@@ -17,6 +17,18 @@ hmac.workspace = true
 sha2.workspace = true
 zeroize.workspace = true
 chrono.workspace = true
+bytes.workspace = true
+fastrand.workspace = true
+quick-xml.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+md-5.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 
 [lints]
 workspace = true

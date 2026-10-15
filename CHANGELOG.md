@@ -5,6 +5,14 @@ Semantic Versioning.
 
 ## Unreleased
 
+- `Client` and `ClientBuilder`: bucket calls (create, delete, exists, list) and object calls (put, get, head, delete,
+  copy, list one page in byte order) over HTTPS with the platform's trust store, path-style addressing, every request
+  signed when it is sent. Bodies are held in memory for now.
+- `BucketName` and `ObjectKey` check the S3 naming rules when they are made; a key with a `.` or `..` path segment is
+  refused, because a URL would collapse it.
+- `Error` gains a category (`ErrorCategory`), the server's S3 code, status and request ID, and a retry class:
+  transient failures are retried up to three times with full-jitter backoff, then reported as `RetriesExhausted`.
+- Response documents are read without a DTD or any entity beyond the five predefined ones, and are capped at 8 MiB.
 - `sign`: AWS Signature Version 4 for S3 — the `Authorization` header and presigned-URL query (1 second to
   seven days), as pure functions reproducing the AWS published examples. Credentials keep their secret out of
   `Debug` output and wipe it on drop.

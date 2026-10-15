@@ -27,6 +27,12 @@ allow = [
 ]
 private = { ignore = true }
 
+# The platform's root certificates, bundled as data for systems without a usable trust store: a permissive data
+# licence on the certificate list, allowed for that one crate and nowhere else.
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
