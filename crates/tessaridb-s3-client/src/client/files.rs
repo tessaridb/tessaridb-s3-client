@@ -13,18 +13,20 @@ use tokio::io::AsyncWriteExt as _;
 use super::Client;
 use super::objects::{checksum_mode, etag, upload_checksum};
 use crate::checksum::{Crc64Nvme, UPLOAD_ALGORITHM, Verifier};
-use crate::constants::{FILE_CHUNK_BYTES, SINGLE_PUT_MAX_BYTES};
+use crate::constants::{FILE_CHUNK_BYTES, MULTIPART_THRESHOLD_BYTES};
 use crate::sign::hex;
 use crate::transport::{Payload, Request, transport_error};
 use crate::{BucketName, Error, ObjectKey, Result};
 
 impl Client {
     /// Uploads the file at `path` as `bucket/key` and returns its ETag. The body is signed with the file's SHA-256
-    /// and carries its CRC64NVME, so the server stores it only if every byte arrived as hashed.
+    /// and carries its CRC64NVME, so the server stores it only if every byte arrived as hashed. A file over 16 MiB
+    /// goes in parts (see `resume_upload`).
     ///
     /// # Errors
-    /// [`Error::Io`] when the file cannot be read; [`Error::InvalidArgument`] for a file over 5 GiB (larger files go
-    /// in parts) or one that changed while being sent; the server's refusal otherwise.
+    /// [`Error::Io`] when the file cannot be read; [`Error::InvalidArgument`] for a file over 10 000 parts of 5 GiB
+    /// or one that changed while being sent; [`Error::UploadInterrupted`] when a multipart upload stopped on a
+    /// transient failure and can be resumed; the server's refusal otherwise.
     pub async fn upload_file(
         &self,
         bucket: &BucketName,
@@ -34,11 +36,8 @@ impl Client {
     ) -> Result<String> {
         let path = path.as_ref().to_path_buf();
         let length = tokio::fs::metadata(&path).await.map_err(to_upload)?.len();
-        if length > SINGLE_PUT_MAX_BYTES {
-            return Err(Error::InvalidArgument {
-                what: "file to upload",
-                rule: "at most 5 GiB in one request",
-            });
+        if length > MULTIPART_THRESHOLD_BYTES {
+            return self.upload_in_parts(bucket, key, &path, content_type).await;
         }
         let (sha256, crc) = digests_of(path.clone()).await?;
         let mut request = Request::new(Method::PUT, Some(bucket), Some(key));
@@ -49,6 +48,8 @@ impl Client {
         ));
         request.payload = Payload::File {
             path,
+            file_length: length,
+            offset: 0,
             length,
             sha256,
         };

@@ -31,9 +31,6 @@ pub(crate) const CONNECT_TIMEOUT_SECS: u64 = 10;
 /// How long a transfer may go without receiving anything, in seconds — the bound on a body of any size.
 pub(crate) const READ_TIMEOUT_SECS: u64 = 60;
 
-/// The largest object one `PUT` may carry, in bytes (5 GiB); larger ones go in parts.
-pub(crate) const SINGLE_PUT_MAX_BYTES: u64 = 5 * 1024 * 1024 * 1024;
-
 /// How much of a file is read or written at a time, in bytes.
 pub(crate) const FILE_CHUNK_BYTES: usize = 1024 * 1024;
 
@@ -51,3 +48,21 @@ pub(crate) const RETRY_MAX_DELAY_MS: u64 = 5_000;
 
 /// How long a call may spend across all its attempts before no further one starts, in seconds.
 pub(crate) const RETRY_MAX_ELAPSED_SECS: u64 = 120;
+
+/// The most parts one multipart upload may have; part numbers run 1 to this.
+pub(crate) const MAX_PARTS: u16 = 10_000;
+
+/// Files larger than this, in bytes, are uploaded in parts (16 MiB).
+pub(crate) const MULTIPART_THRESHOLD_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The smallest part this client sends, in bytes (8 MiB); S3 requires at least 5 MiB for every part but the last.
+pub(crate) const PART_SIZE_MIN_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The largest part S3 accepts, in bytes (5 GiB).
+pub(crate) const PART_SIZE_MAX_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+
+/// Part sizes are rounded up to a multiple of this, in bytes (1 MiB).
+pub(crate) const PART_SIZE_STEP_BYTES: u64 = 1024 * 1024;
+
+/// How many parts of one file are in flight at once.
+pub(crate) const PART_CONCURRENCY: usize = 4;

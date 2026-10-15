@@ -4,7 +4,10 @@
 
 mod parse;
 
-pub(crate) use parse::{copy_result, error_document, list_buckets, list_objects_v2};
+pub(crate) use parse::{
+    StoredPart, complete_result, copy_result, error_document, list_buckets, list_objects_v2,
+    list_parts, upload_id,
+};
 
 use quick_xml::Reader;
 use quick_xml::escape::resolve_predefined_entity;

@@ -4,6 +4,7 @@
 
 mod buckets;
 mod files;
+mod multipart;
 mod objects;
 
 use std::sync::Arc;

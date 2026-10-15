@@ -1,4 +1,7 @@
-use super::{copy_result, error_document, list_buckets, list_objects_v2, tree};
+use super::{
+    StoredPart, complete_result, copy_result, error_document, list_buckets, list_objects_v2,
+    list_parts, tree, upload_id,
+};
 use crate::{Error, ErrorCategory};
 
 const NS: &str = "http://s3.amazonaws.com/doc/2006-03-01/";
@@ -150,5 +153,59 @@ fn a_copy_answer_gives_its_etag_or_the_error_hidden_in_a_200() {
     );
     assert!(
         matches!(&hidden, Err(error) if error.category() == ErrorCategory::Unavailable && error.s3_code() == Some("InternalError"))
+    );
+}
+
+#[test]
+fn multipart_answers_give_the_upload_id_the_parts_and_the_final_etag() {
+    assert_eq!(
+        upload_id(b"<InitiateMultipartUploadResult><Bucket>b</Bucket><Key>k</Key><UploadId>abc-123</UploadId></InitiateMultipartUploadResult>").ok(),
+        Some("abc-123".to_owned())
+    );
+    assert_eq!(
+        what(upload_id(
+            b"<InitiateMultipartUploadResult><UploadId></UploadId></InitiateMultipartUploadResult>"
+        )),
+        "an empty upload ID"
+    );
+    let page = list_parts(b"<ListPartsResult><IsTruncated>true</IsTruncated><NextPartNumberMarker>2</NextPartNumberMarker><Part><PartNumber>1</PartNumber><ETag>\"e1\"</ETag><Size>8388608</Size></Part><Part><PartNumber>2</PartNumber><ETag>\"e2\"</ETag><Size>5</Size></Part></ListPartsResult>");
+    assert_eq!(
+        page.ok(),
+        Some((
+            vec![
+                StoredPart {
+                    number: 1,
+                    etag: "\"e1\"".to_owned(),
+                    size: 8_388_608
+                },
+                StoredPart {
+                    number: 2,
+                    etag: "\"e2\"".to_owned(),
+                    size: 5
+                },
+            ],
+            Some("2".to_owned())
+        ))
+    );
+    assert_eq!(
+        what(list_parts(
+            b"<ListPartsResult><IsTruncated>true</IsTruncated></ListPartsResult>"
+        )),
+        "a truncated part list without a marker"
+    );
+    assert_eq!(what(list_parts(b"<ListPartsResult><Part><PartNumber>10001</PartNumber><ETag>e</ETag><Size>1</Size></Part></ListPartsResult>")), "a part number that is not 1 to 10000");
+    assert_eq!(what(list_parts(b"<ListPartsResult><Part><PartNumber>0x1</PartNumber><ETag>e</ETag><Size>1</Size></Part></ListPartsResult>")), "a part number that is not 1 to 10000");
+    assert_eq!(
+        complete_result(
+            b"<CompleteMultipartUploadResult><ETag>\"m-3\"</ETag></CompleteMultipartUploadResult>",
+            200
+        )
+        .ok(),
+        Some("\"m-3\"".to_owned())
+    );
+    let hidden = complete_result(b"<Error><Code>InvalidPart</Code></Error>", 200);
+    assert!(
+        matches!(&hidden, Err(error) if error.s3_code() == Some("InvalidPart")),
+        "{hidden:?}"
     );
 }

@@ -5,6 +5,9 @@ Semantic Versioning.
 
 ## Unreleased
 
+- Multipart: `upload_file` sends files over 16 MiB in parts (one planning read, four parts in flight, whole-file
+  CRC64NVME checked by the server at completion); `begin_upload`, `resume_upload` (sends only the parts the server
+  does not hold intact) and `abort_upload`; a transient failure leaves the upload open as `UploadInterrupted`.
 - Checksums: `put_object` and `upload_file` declare the body's CRC64NVME; `get_object` and `download_file` check the
   body against every whole-object checksum the server returns (CRC32, CRC32C, CRC64NVME, SHA-1, SHA-256) before
   handing it over, retrying on `ChecksumMismatch`. `head_object` reports the stored CRC64NVME.

@@ -61,6 +61,16 @@ pub enum Error {
         /// The algorithm whose value differed, e.g. `CRC64NVME`.
         algorithm: &'static str,
     },
+    /// A multipart upload stopped on a transient failure and was left open: `resume_upload` with `upload_id`
+    /// finishes it, sending only the parts the server does not hold intact; `abort_upload` discards it.
+    #[error("the upload {upload_id} was interrupted and can be resumed")]
+    UploadInterrupted {
+        /// The open upload's ID.
+        upload_id: String,
+        /// The failure that stopped it.
+        #[source]
+        last: Box<Error>,
+    },
     /// A local file could not be read or written.
     #[error("cannot use {what}")]
     Io {
@@ -134,7 +144,9 @@ impl Error {
                 _ => ErrorCategory::Internal,
             },
             Self::InvalidResponse { .. } | Self::Setup { .. } => ErrorCategory::Internal,
-            Self::RetriesExhausted { last, .. } => last.category(),
+            Self::RetriesExhausted { last, .. } | Self::UploadInterrupted { last, .. } => {
+                last.category()
+            }
         }
     }
 
@@ -154,6 +166,7 @@ impl Error {
             | Self::InvalidResponse { .. }
             | Self::Io { .. }
             | Self::RetriesExhausted { .. }
+            | Self::UploadInterrupted { .. }
             | Self::Setup { .. } => false,
         }
     }
@@ -163,7 +176,9 @@ impl Error {
     pub fn s3_code(&self) -> Option<&str> {
         match self {
             Self::Service { code, .. } => code.as_deref(),
-            Self::RetriesExhausted { last, .. } => last.s3_code(),
+            Self::RetriesExhausted { last, .. } | Self::UploadInterrupted { last, .. } => {
+                last.s3_code()
+            }
             _ => None,
         }
     }

@@ -1104,6 +1104,7 @@ dependencies = [
  "chrono",
  "crc-fast",
  "fastrand",
+ "futures-util",
  "hmac",
  "md-5",
  "quick-xml",

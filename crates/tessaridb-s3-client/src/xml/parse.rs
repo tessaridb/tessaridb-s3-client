@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 
 use super::{Node, malformed, tree};
 use crate::Error;
+use crate::constants::MAX_PARTS;
 use crate::{BucketInfo, ListPage, ObjectInfo};
 
 /// The parts of an S3 `<Error>` document: code, message and request ID; `None` when `body` is not one.
@@ -101,6 +102,68 @@ pub(crate) fn copy_result(body: &[u8], status: u16) -> Result<String, Error> {
     }
     let root = rooted(body, "CopyObjectResult")?;
     Ok(required(&root, "ETag")?.to_owned())
+}
+
+/// The upload ID an `InitiateMultipartUploadResult` names.
+pub(crate) fn upload_id(body: &[u8]) -> Result<String, Error> {
+    let root = rooted(body, "InitiateMultipartUploadResult")?;
+    let id = required(&root, "UploadId")?;
+    if id.is_empty() {
+        return Err(malformed("an empty upload ID"));
+    }
+    Ok(id.to_owned())
+}
+
+/// The ETag of a `CompleteMultipartUpload` answer, or the error the server reported inside its 200.
+pub(crate) fn complete_result(body: &[u8], status: u16) -> Result<String, Error> {
+    if let Some((code, message, request_id)) = error_document(body) {
+        return Err(Error::Service {
+            status,
+            code: Some(code),
+            message,
+            request_id,
+        });
+    }
+    let root = rooted(body, "CompleteMultipartUploadResult")?;
+    Ok(required(&root, "ETag")?.to_owned())
+}
+
+/// A part the server holds for an open upload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StoredPart {
+    pub(crate) number: u16,
+    pub(crate) etag: String,
+    pub(crate) size: u64,
+}
+
+/// One page of a `ListParts` answer and the marker for the next page.
+pub(crate) fn list_parts(body: &[u8]) -> Result<(Vec<StoredPart>, Option<String>), Error> {
+    let root = rooted(body, "ListPartsResult")?;
+    let parts = root
+        .all("Part")
+        .map(|part| {
+            Ok(StoredPart {
+                number: required(part, "PartNumber")?
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|number| (1..=MAX_PARTS).contains(number))
+                    .ok_or_else(|| malformed("a part number that is not 1 to 10000"))?,
+                etag: required(part, "ETag")?.to_owned(),
+                size: required(part, "Size")?
+                    .parse()
+                    .map_err(|_| malformed("a part size that is not a number"))?,
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    let next = match (
+        root.text_of("IsTruncated") == Some("true"),
+        root.text_of("NextPartNumberMarker"),
+    ) {
+        (true, Some(marker)) if !marker.is_empty() => Some(marker.to_owned()),
+        (true, _) => return Err(malformed("a truncated part list without a marker")),
+        (false, _) => None,
+    };
+    Ok((parts, next))
 }
 
 fn rooted(body: &[u8], name: &'static str) -> Result<Node, Error> {

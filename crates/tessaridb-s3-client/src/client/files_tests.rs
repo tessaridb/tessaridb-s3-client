@@ -70,42 +70,14 @@ async fn the_file_digests_are_the_digests_of_its_bytes() -> crate::Result<()> {
 }
 
 #[tokio::test]
-async fn a_file_over_five_gib_is_refused_before_anything_is_read_or_sent() -> crate::Result<()> {
+async fn a_missing_file_is_reported_before_anything_is_sent() -> crate::Result<()> {
     let directory = tempfile::tempdir().map_err(|source| Error::Io {
         what: "a test directory",
         source,
     })?;
-    let path = directory.path().join("huge");
-    let file = std::fs::File::create(&path).map_err(|source| Error::Io {
-        what: "the file",
-        source,
-    })?;
-    file.set_len(5 * 1024 * 1024 * 1024 + 1)
-        .map_err(|source| Error::Io {
-            what: "the file",
-            source,
-        })?;
     // Nothing listens on 47925: a request would fail differently from the refusal asserted here.
     let client =
         ClientBuilder::new("http://127.0.0.1:47925", Credentials::new("a", "b")).build()?;
-    let refused = client
-        .upload_file(
-            &BucketName::new("bucket")?,
-            &ObjectKey::new("huge")?,
-            &path,
-            None,
-        )
-        .await;
-    assert!(
-        matches!(
-            refused,
-            Err(Error::InvalidArgument {
-                rule: "at most 5 GiB in one request",
-                ..
-            })
-        ),
-        "{refused:?}"
-    );
     let missing = client
         .upload_file(
             &BucketName::new("bucket")?,

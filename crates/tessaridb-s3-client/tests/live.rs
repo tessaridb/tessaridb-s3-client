@@ -352,3 +352,84 @@ async fn a_missing_object_leaves_the_target_file_untouched() -> Result<()> {
     );
     client.delete_bucket(&bucket).await
 }
+
+/// `length` bytes from xorshift64: no two 8 MiB windows of it are equal.
+fn pseudo_random(length: usize) -> Vec<u8> {
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    (0..length)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state.to_be_bytes()[0]
+        })
+        .collect()
+}
+
+fn crc64nvme(bytes: &[u8]) -> String {
+    let crc = crc_fast::checksum(crc_fast::CrcAlgorithm::Crc64Nvme, bytes).to_be_bytes();
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, crc)
+}
+
+#[tokio::test]
+async fn a_large_file_goes_up_in_parts_and_comes_back_whole() -> Result<()> {
+    let Some(client) = client()? else {
+        return Ok(());
+    };
+    let bucket = unique_bucket("multipart")?;
+    client.create_bucket(&bucket).await?;
+    let directory = tempfile::tempdir().map_err(io("a test directory"))?;
+    let source = directory.path().join("large.bin");
+    // No period: parts must differ from each other, or a part sent from the wrong offset would go unnoticed.
+    let bytes = pseudo_random(21 * 1024 * 1024 + 5);
+    std::fs::write(&source, &bytes).map_err(io("the source file"))?;
+    let key = ObjectKey::new("big/large.bin")?;
+    let etag = client.upload_file(&bucket, &key, &source, None).await?;
+    assert!(etag.ends_with("-3\""), "{etag}");
+    let info = client.head_object(&bucket, &key).await?;
+    assert_eq!(info.size, u64::try_from(bytes.len()).unwrap_or(0));
+    assert_eq!(info.crc64nvme, Some(crc64nvme(&bytes)));
+    let target = directory.path().join("back.bin");
+    client.download_file(&bucket, &key, &target).await?;
+    assert!(std::fs::read(&target).map_err(io("the target file"))? == bytes);
+    empty_and_delete(&client, &bucket).await
+}
+
+#[tokio::test]
+async fn an_upload_is_resumed_by_its_id_and_an_aborted_one_is_gone() -> Result<()> {
+    let Some(client) = client()? else {
+        return Ok(());
+    };
+    let bucket = unique_bucket("resume")?;
+    client.create_bucket(&bucket).await?;
+    let directory = tempfile::tempdir().map_err(io("a test directory"))?;
+    let source = directory.path().join("resume.bin");
+    let bytes = pseudo_random(9 * 1024 * 1024);
+    std::fs::write(&source, &bytes).map_err(io("the source file"))?;
+    let key = ObjectKey::new("resumed.bin")?;
+    let upload = client.begin_upload(&bucket, &key, None).await?;
+    let etag = client
+        .resume_upload(&bucket, &key, &source, &upload)
+        .await?;
+    assert!(etag.ends_with("-2\""), "{etag}");
+    assert_eq!(client.get_object(&bucket, &key).await?.len(), bytes.len());
+    let again = client.resume_upload(&bucket, &key, &source, &upload).await;
+    assert!(
+        matches!(&again, Err(error) if error.s3_code() == Some("NoSuchUpload")),
+        "{again:?}"
+    );
+    let aborted = client
+        .begin_upload(&bucket, &ObjectKey::new("aborted.bin")?, None)
+        .await?;
+    client
+        .abort_upload(&bucket, &ObjectKey::new("aborted.bin")?, &aborted)
+        .await?;
+    let gone = client
+        .resume_upload(&bucket, &ObjectKey::new("aborted.bin")?, &source, &aborted)
+        .await;
+    assert!(
+        matches!(&gone, Err(error) if error.s3_code() == Some("NoSuchUpload")),
+        "{gone:?}"
+    );
+    empty_and_delete(&client, &bucket).await
+}

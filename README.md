@@ -37,9 +37,11 @@ the server's licence reaches a program that embeds this one.
 | Request signing (SigV4: header, presigned URL) | done in `tessaridb_s3_client::sign`, reproducing the AWS published examples |
 | Buckets (create, delete, exists, list) and objects (put, get, head, delete, copy, list) | done, bodies held in memory; retried on transient failures |
 | Errors | one `Error` type: a category to branch on, the S3 code, status and request ID kept |
-| Files: upload and download streamed from and to disk | done, up to 5 GiB per file in one request |
+| Files: upload and download streamed from and to disk | done; files over 16 MiB go up in parts (8 MiB or larger, four at a time) |
+| Multipart: resume by upload ID, abort | done |
 | Checksums | done: uploads carry their CRC64NVME; downloads are checked against every whole-object checksum the server keeps (CRC32, CRC32C, CRC64NVME, SHA-1, SHA-256) and retried on a mismatch |
-| Files: multipart with resume, presigned links | not started |
+| Presigned links | signing done; client calls not started |
+| Download resume (ranged retry) | not started |
 | Command line (`ls`, `cp`, `mv`, `rm`, `mb`, `rb`, `stat`, `presign`, `sync`) | not started |
 
 ## Using the library
@@ -73,6 +75,11 @@ let page = client.list_objects(&bucket, &ListObjects::default()).await?;
   file beside the target and renames it into place only when the whole object arrived; on any failure, including a
   cancelled future, the target is left as it was. A transfer fails when nothing arrives for 60 seconds, however long
   the whole transfer takes.
+- **Large files go in parts.** A file over 16 MiB is read once to plan its parts (8 MiB, larger when 10 000 parts
+  would not hold it) and the whole file's CRC64NVME, then sent four parts at a time, each signed with its own hash.
+  If parts keep failing on a transient error, `upload_file` returns `UploadInterrupted` carrying the upload ID and
+  leaves the upload open: `resume_upload` with that ID sends only the parts the server does not already hold intact,
+  and `abort_upload` discards it. A permanent failure aborts the upload.
 - **Integrity is checked end to end.** Every upload declares its CRC64NVME, which the server verifies and keeps;
   every download asks for the checksums the server keeps and checks the bytes against each one that covers the whole
   object. A body that does not match is never handed over or written into place — the download is tried again, and
