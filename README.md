@@ -34,7 +34,7 @@ the server's licence reaches a program that embeds this one.
 | Part | State |
 |---|---|
 | Workspace, licence, checks | in place |
-| Request signing (SigV4: header, presigned URL) | not started |
+| Request signing (SigV4: header, presigned URL) | done in `tessaridb_s3_client::sign`, reproducing the AWS published examples; no operation uses it yet |
 | Objects and buckets (put, get, head, delete, copy, list) | not started |
 | Files: streaming, multipart with resume | not started |
 | Command line (`ls`, `cp`, `mv`, `rm`, `mb`, `rb`, `stat`, `presign`, `sync`) | not started |

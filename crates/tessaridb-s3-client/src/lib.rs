@@ -4,6 +4,8 @@
 //!
 //! The crate is being built; nothing here is usable yet. The repository's README tracks what works.
 
+mod constants;
 mod error;
+pub mod sign;
 
 pub use error::{Error, Result};
