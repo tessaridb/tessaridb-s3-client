@@ -5,6 +5,12 @@ Semantic Versioning.
 
 ## Unreleased
 
+- `tessaridb-s3-cli`: `ls`, `stat`, `presign`, `mb`, `rb`, `cp`, `mv`, `rm` and `sync` over the library. Credentials
+  come from the environment or an owner-only profile file, never from an argument. Commands that change data take
+  `--dry-run`; commands that delete need `--yes`; an existing destination is replaced only with `--yes`. Every change
+  is checked against the server afterwards, and exit codes separate invalid input (2), a refused safety check (3), a
+  failure (4), an unconfirmed result (5) and an interruption (130). Server text is printed with control characters
+  escaped.
 - `presign_get` and `presign_put`: path-style presigned URLs for one request, 1 second to 7 days.
 - `download_file` resumes a broken transfer: the next attempt requests the missing range with `If-Match` on the
   object's ETag and continues the same part file and checksum.

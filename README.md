@@ -42,7 +42,7 @@ the server's licence reaches a program that embeds this one.
 | Checksums | done: uploads carry their CRC64NVME; downloads are checked against every whole-object checksum the server keeps (CRC32, CRC32C, CRC64NVME, SHA-1, SHA-256) and retried on a mismatch |
 | Presigned links (`presign_get`, `presign_put`) | done |
 | Download resume (ranged retry) | done |
-| Command line (`ls`, `cp`, `mv`, `rm`, `mb`, `rb`, `stat`, `presign`, `sync`) | not started |
+| Command line (`ls`, `cp`, `mv`, `rm`, `mb`, `rb`, `stat`, `presign`, `sync`) | done: `tessaridb-s3-cli` |
 
 ## Using the library
 
@@ -90,6 +90,65 @@ let page = client.list_objects(&bucket, &ListObjects::default()).await?;
   every download asks for the checksums the server keeps and checks the bytes against each one that covers the whole
   object. A body that does not match is never handed over or written into place — the download is tried again, and
   `ChecksumMismatch` is reported if it keeps failing.
+
+## Using the command line
+
+`tessaridb-s3-cli` does the same work from a shell. It reads the endpoint and credentials from the environment —
+`TESSARIDB_S3_ENDPOINT`, `TESSARIDB_S3_ACCESS_KEY`, `TESSARIDB_S3_SECRET_KEY`, and optionally `TESSARIDB_S3_REGION` —
+or, when those are not set, from a profile file at `~/.config/tessaridb-s3/credentials` (`$XDG_CONFIG_HOME` when
+set), which must be readable by its owner alone (`chmod 600`):
+
+```ini
+[default]
+endpoint = https://s3.example.com
+access_key = ...
+secret_key = ...
+```
+
+`--profile <name>` picks another section. There is no flag for a secret: a command-line argument is visible to every
+process on the machine and stays in shell history.
+
+```sh
+tessaridb-s3-cli mb s3://photos
+tessaridb-s3-cli cp holiday.jpg s3://photos/2026/          # keeps the name: s3://photos/2026/holiday.jpg
+tessaridb-s3-cli ls s3://photos/ --recursive
+tessaridb-s3-cli stat s3://photos/2026/holiday.jpg --json
+tessaridb-s3-cli presign s3://photos/2026/holiday.jpg --expires 600
+tessaridb-s3-cli sync ./albums s3://photos/albums           # and back: sync s3://photos/albums ./albums
+tessaridb-s3-cli rm s3://photos/2026 --recursive --yes      # everything under photos/2026/
+```
+
+| Command | What it does | Changes data |
+|---|---|---|
+| `ls [s3://bucket[/prefix]]` | the buckets, or one level of objects (`--recursive`: all of them) | no |
+| `stat s3://bucket/key` | size, ETag, CRC64NVME, last modified | no |
+| `presign s3://bucket/key` | a download link (`--put`: an upload link), `--expires` seconds (default 3600, at most 604800) | no |
+| `mb s3://bucket` | creates the bucket | yes |
+| `cp SOURCE DEST` | file → object, object → file, or object → object; an existing destination is replaced only with `--yes` | yes |
+| `sync SOURCE DEST` | a directory → a prefix, or back: copies what is missing or differs, never deletes | yes |
+| `rb s3://bucket --yes` | deletes an empty bucket | deletes |
+| `rm s3://bucket/key --yes` | deletes an object; `--recursive` everything under a prefix taken as a directory | deletes |
+| `mv SOURCE DEST --yes` | copies, checks the copy, then deletes the source | deletes |
+
+Every command that changes data accepts `--dry-run`, which prints what it would do and changes nothing. A command
+that deletes refuses to run without `--yes`. After each change the server (or the file system) is asked again, and the
+command fails if the result is not what was asked: a copy must have the source's size, a deleted object must be gone.
+`sync` decides a file is unchanged only when that is proven — equal size, then the MD5 a single-part ETag carries,
+otherwise the CRC64NVME the server keeps — and sends it otherwise. Going down, a key that would land outside the
+target directory (a `..` or empty segment) is skipped, reported, and makes the run fail.
+
+What the server sends — keys, messages — is printed with control characters escaped, so a key cannot move the cursor
+or retitle the terminal. Deletions are reported on standard error as they happen; `--json` prints one JSON object per
+line. Logs go to standard error, filtered by `TESSARIDB_S3_LOG` (`warn` by default).
+
+| Exit code | Meaning |
+|---|---|
+| 0 | done (also when whoever reads the output stops early, as with `\| head`) |
+| 2 | the command, a location or the settings are invalid — nothing was sent |
+| 3 | a safety check refused: the destination exists, the bucket is not empty, the object is missing |
+| 4 | the server or the file system failed |
+| 5 | it ran, but the check afterwards found a different result |
+| 130 | interrupted by Ctrl-C or SIGTERM; an interrupted multipart upload stays open on the server until it is aborted |
 
 ## Building
 

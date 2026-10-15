@@ -32,6 +32,10 @@ tokio = { version = "1", features = ["time", "fs", "io-util", "rt"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tempfile = "3"
 tracing = "0.1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std"] }
 tessaridb-s3-client = { path = "crates/tessaridb-s3-client", version = "0.0.0" }
 
 [workspace.lints.rust]
