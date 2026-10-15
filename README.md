@@ -12,8 +12,8 @@
 </div>
 
 > [!WARNING]
-> **Under active development.** Not published to crates.io. The library does bucket and object calls on bodies held
-> in memory; files, multipart and the command line are still to come. See [**Status**](#status).
+> **Under active development.** Not published to crates.io. The library does bucket and object calls and streams
+> files up to 5 GiB; multipart, presigned links and the command line are still to come. See [**Status**](#status).
 
 Two crates live here:
 
@@ -37,7 +37,8 @@ the server's licence reaches a program that embeds this one.
 | Request signing (SigV4: header, presigned URL) | done in `tessaridb_s3_client::sign`, reproducing the AWS published examples |
 | Buckets (create, delete, exists, list) and objects (put, get, head, delete, copy, list) | done, bodies held in memory; retried on transient failures |
 | Errors | one `Error` type: a category to branch on, the S3 code, status and request ID kept |
-| Files: streaming, multipart with resume | not started |
+| Files: upload and download streamed from and to disk | done, up to 5 GiB per file in one request |
+| Files: multipart with resume, presigned links, checksums | not started |
 | Command line (`ls`, `cp`, `mv`, `rm`, `mb`, `rb`, `stat`, `presign`, `sync`) | not started |
 
 ## Using the library
@@ -66,6 +67,11 @@ let page = client.list_objects(&bucket, &ListObjects::default()).await?;
   and the rest — never on the message. A transient failure (a timeout, a lost connection, `SlowDown`, a 5xx) is retried
   up to three times with a randomised backoff; when the attempts run out you get `RetriesExhausted` with the last cause.
 - **Redirects are not followed**: a signed request sent to another host would be a different request.
+- **Files stream.** `upload_file` reads the file once to hash it, then sends it in 1 MiB chunks, signed with that
+  hash — the server stores it only if every byte arrived as hashed. `download_file` writes into a hidden `.part`
+  file beside the target and renames it into place only when the whole object arrived; on any failure, including a
+  cancelled future, the target is left as it was. A transfer fails when nothing arrives for 60 seconds, however long
+  the whole transfer takes.
 
 ## Building
 

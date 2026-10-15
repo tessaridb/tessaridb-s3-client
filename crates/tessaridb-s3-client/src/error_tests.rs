@@ -116,3 +116,28 @@ fn exhausted_retries_keep_the_last_cause_its_category_and_its_code() {
         Some("the server refused the request: HTTP 503 SlowDown")
     );
 }
+
+#[test]
+fn a_local_file_failure_is_categorised_by_its_kind_and_never_retried() {
+    let io = |kind| Error::Io {
+        what: "the file to upload",
+        source: std::io::Error::from(kind),
+    };
+    assert_eq!(
+        io(std::io::ErrorKind::NotFound).category(),
+        ErrorCategory::NotFound
+    );
+    assert_eq!(
+        io(std::io::ErrorKind::PermissionDenied).category(),
+        ErrorCategory::Forbidden
+    );
+    assert_eq!(
+        io(std::io::ErrorKind::WriteZero).category(),
+        ErrorCategory::Internal
+    );
+    assert!(!io(std::io::ErrorKind::Interrupted).is_retryable());
+    assert_eq!(
+        io(std::io::ErrorKind::NotFound).to_string(),
+        "cannot use the file to upload"
+    );
+}

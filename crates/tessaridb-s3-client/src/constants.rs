@@ -28,6 +28,15 @@ pub(crate) const XML_MAX_DEPTH: usize = 8;
 /// How long to wait for a TCP + TLS connection, in seconds.
 pub(crate) const CONNECT_TIMEOUT_SECS: u64 = 10;
 
+/// How long a transfer may go without receiving anything, in seconds — the bound on a body of any size.
+pub(crate) const READ_TIMEOUT_SECS: u64 = 60;
+
+/// The largest object one `PUT` may carry, in bytes (5 GiB); larger ones go in parts.
+pub(crate) const SINGLE_PUT_MAX_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+
+/// How much of a file is read or written at a time, in bytes.
+pub(crate) const FILE_CHUNK_BYTES: usize = 1024 * 1024;
+
 /// How long one request may take end to end, in seconds, for calls with a small body.
 pub(crate) const REQUEST_TIMEOUT_SECS: u64 = 60;
 

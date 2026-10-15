@@ -3,6 +3,7 @@
 //! operation here is.
 
 mod buckets;
+mod files;
 mod objects;
 
 use std::sync::Arc;

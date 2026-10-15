@@ -275,3 +275,76 @@ async fn an_unreachable_server_is_retried_then_reported_unavailable() -> Result<
     );
     Ok(())
 }
+
+fn io(what: &'static str) -> impl FnOnce(std::io::Error) -> Error {
+    move |source| Error::Io { what, source }
+}
+
+#[tokio::test]
+async fn a_file_of_several_mebibytes_streams_up_and_down_unchanged() -> Result<()> {
+    let Some(client) = client()? else {
+        return Ok(());
+    };
+    let bucket = unique_bucket("file")?;
+    client.create_bucket(&bucket).await?;
+    let directory = tempfile::tempdir().map_err(io("a test directory"))?;
+    let source = directory.path().join("source.bin");
+    let bytes: Vec<u8> = (0..5_242_883_u32)
+        .map(|n| u8::try_from(n.wrapping_mul(2_654_435_761) >> 24).unwrap_or(0))
+        .collect();
+    std::fs::write(&source, &bytes).map_err(io("the source file"))?;
+    let key = ObjectKey::new("files/source copy.bin")?;
+    let etag = client
+        .upload_file(&bucket, &key, &source, Some("application/octet-stream"))
+        .await?;
+    assert_eq!(etag, quoted_md5(&bytes));
+    let target = directory.path().join("target.bin");
+    std::fs::write(&target, b"stale").map_err(io("the target file"))?;
+    let written = client.download_file(&bucket, &key, &target).await?;
+    assert_eq!(written, u64::try_from(bytes.len()).unwrap_or(0));
+    assert!(std::fs::read(&target).map_err(io("the target file"))? == bytes);
+    let mut names: Vec<String> = std::fs::read_dir(directory.path())
+        .map_err(io("the test directory"))?
+        .filter_map(|entry| {
+            entry
+                .ok()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        })
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["source.bin".to_owned(), "target.bin".to_owned()]
+    );
+    empty_and_delete(&client, &bucket).await
+}
+
+#[tokio::test]
+async fn a_missing_object_leaves_the_target_file_untouched() -> Result<()> {
+    let Some(client) = client()? else {
+        return Ok(());
+    };
+    let bucket = unique_bucket("nofile")?;
+    client.create_bucket(&bucket).await?;
+    let directory = tempfile::tempdir().map_err(io("a test directory"))?;
+    let target = directory.path().join("keep.txt");
+    std::fs::write(&target, b"keep me").map_err(io("the target file"))?;
+    let missing = client
+        .download_file(&bucket, &ObjectKey::new("absent")?, &target)
+        .await;
+    assert!(
+        matches!(&missing, Err(error) if error.s3_code() == Some("NoSuchKey")),
+        "{missing:?}"
+    );
+    assert_eq!(
+        std::fs::read(&target).ok().as_deref(),
+        Some(&b"keep me"[..])
+    );
+    assert_eq!(
+        std::fs::read_dir(directory.path())
+            .map_err(io("the test directory"))?
+            .count(),
+        1
+    );
+    client.delete_bucket(&bucket).await
+}

@@ -3,7 +3,7 @@
 use reqwest::Method;
 
 use super::{Client, DEFAULT_REGION};
-use crate::transport::Request;
+use crate::transport::{Payload, Request};
 use crate::{BucketInfo, BucketName};
 use crate::{Error, Result, xml};
 
@@ -25,11 +25,13 @@ impl Client {
     pub async fn create_bucket(&self, bucket: &BucketName) -> Result<()> {
         let mut request = Request::new(Method::PUT, Some(bucket), None);
         if self.region != DEFAULT_REGION {
-            request.body = format!(
+            request.payload = Payload::Memory(
+                format!(
                 "<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><LocationConstraint>{}</LocationConstraint></CreateBucketConfiguration>",
-                self.region
-            )
-            .into();
+                    self.region
+                )
+                .into(),
+            );
         }
         let request = &request;
         self.retry

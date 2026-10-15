@@ -11,11 +11,18 @@ use reqwest::header::HeaderMap;
 use reqwest::{Method, Url};
 use rustls::ClientConfig;
 
-use crate::constants::{CONNECT_TIMEOUT_SECS, REQUEST_TIMEOUT_SECS, XML_BODY_MAX_BYTES};
+use crate::constants::{
+    CONNECT_TIMEOUT_SECS, READ_TIMEOUT_SECS, REQUEST_TIMEOUT_SECS, XML_BODY_MAX_BYTES,
+};
 use crate::error::TransportFailure;
-use crate::sign::{Signer, amz_date, canonical_uri, payload_sha256, uri_encode};
+use crate::sign::{Signer, amz_date, canonical_uri, uri_encode};
 use crate::{BucketName, ObjectKey};
 use crate::{Error, Result, xml};
+
+mod payload;
+
+pub(crate) use payload::Payload;
+use payload::body;
 
 /// A request before it is signed.
 #[derive(Debug)]
@@ -27,7 +34,7 @@ pub(crate) struct Request<'a> {
     pub(crate) query: Vec<(String, String)>,
     /// Extra headers, every one of them signed.
     pub(crate) headers: Vec<(String, String)>,
-    pub(crate) body: Bytes,
+    pub(crate) payload: Payload,
 }
 
 impl<'a> Request<'a> {
@@ -42,7 +49,7 @@ impl<'a> Request<'a> {
             key,
             query: Vec::new(),
             headers: Vec::new(),
-            body: Bytes::new(),
+            payload: Payload::Memory(Bytes::new()),
         }
     }
 }
@@ -74,7 +81,7 @@ impl Transport {
         let base = endpoint_url(endpoint)?;
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
-            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .read_timeout(Duration::from_secs(READ_TIMEOUT_SECS))
             .redirect(reqwest::redirect::Policy::none())
             .tls_backend_preconfigured(tls_config()?)
             .build()
@@ -84,11 +91,41 @@ impl Transport {
         Ok(Self { http, signer, base })
     }
 
-    /// Sends `request` once and reads the whole answer; an error status is an [`Error::Service`].
+    /// Sends `request` once and reads the whole answer within the request time budget; an error status is an
+    /// [`Error::Service`].
     ///
     /// # Errors
     /// [`Error::Service`], [`Error::Timeout`], [`Error::Transport`] or [`Error::InvalidResponse`].
     pub(crate) async fn send(&self, request: &Request<'_>) -> Result<Response> {
+        let budget = Duration::from_secs(REQUEST_TIMEOUT_SECS);
+        tokio::time::timeout(budget, self.send_unbounded(request))
+            .await
+            .map_err(|_| Error::Timeout(budget))?
+    }
+
+    /// Sends `request` once — a body of any size, so no total budget; each read must make progress within the read
+    /// timeout — and reads the answer.
+    ///
+    /// # Errors
+    /// As [`Transport::send`], plus [`Error::Io`] when a file payload cannot be read.
+    pub(crate) async fn send_unbounded(&self, request: &Request<'_>) -> Result<Response> {
+        let answer = self.open(request).await?;
+        let status = answer.status().as_u16();
+        let headers = answer.headers().clone();
+        let body = read_body(answer, request.method == Method::HEAD).await?;
+        Ok(Response {
+            status,
+            headers,
+            body,
+        })
+    }
+
+    /// Sends `request` once and hands back the successful answer unread, for its body to be streamed.
+    ///
+    /// # Errors
+    /// [`Error::Service`] for an error status (its body read up to the cap), [`Error::Timeout`],
+    /// [`Error::Transport`], [`Error::Io`] or [`Error::InvalidArgument`] for a file that changed after hashing.
+    pub(crate) async fn open(&self, request: &Request<'_>) -> Result<reqwest::Response> {
         let path = request_path(request.bucket, request.key);
         let mut url = self.base.clone();
         url.set_path(&canonical_uri(&path));
@@ -107,7 +144,7 @@ impl Transport {
         let mut headers = request.headers.clone();
         headers.push(("host".to_owned(), host_header(&url)));
         headers.push(("x-amz-date".to_owned(), amz_date(now)));
-        let payload_hash = payload_sha256(&request.body);
+        let (body, length, payload_hash) = body(&request.payload).await?;
         headers.push(("x-amz-content-sha256".to_owned(), payload_hash.clone()));
         let authorization = self.signer.authorization(
             request.method.as_str(),
@@ -123,21 +160,18 @@ impl Transport {
         }
         let answer = builder
             .header("authorization", authorization)
-            .body(request.body.clone())
+            .header("content-length", length)
+            .body(body)
             .send()
             .await
             .map_err(transport_error)?;
         let status = answer.status().as_u16();
-        let headers = answer.headers().clone();
-        let body = read_body(answer, request.method == Method::HEAD || status >= 300).await?;
         if status >= 300 {
+            let headers = answer.headers().clone();
+            let body = read_body(answer, true).await?;
             return Err(service_error(status, &headers, &body));
         }
-        Ok(Response {
-            status,
-            headers,
-            body,
-        })
+        Ok(answer)
     }
 }
 
@@ -193,9 +227,9 @@ fn tls_config() -> Result<ClientConfig> {
     Ok(config)
 }
 
-fn transport_error(error: reqwest::Error) -> Error {
+pub(crate) fn transport_error(error: reqwest::Error) -> Error {
     if error.is_timeout() {
-        Error::Timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        Error::Timeout(Duration::from_secs(READ_TIMEOUT_SECS))
     } else {
         Error::Transport(TransportFailure(Box::new(error)))
     }
@@ -239,5 +273,4 @@ fn service_error(status: u16, headers: &HeaderMap, body: &[u8]) -> Error {
 }
 
 #[cfg(test)]
-#[path = "transport_tests.rs"]
 mod tests;

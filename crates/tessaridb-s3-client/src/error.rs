@@ -4,7 +4,8 @@
 //! `timeout`, `unavailable` or `internal` — and the category decides how a caller reacts, never the message text. An
 //! answer from the server keeps the S3 error code, HTTP status and request ID it carried; its category comes from the
 //! code when the code is one S3 documents, otherwise from the status. A request the server refuses as not
-//! implemented is `validation`: asking again will not help, asking differently might.
+//! implemented is `validation`: asking again will not help, asking differently might. A local file that is missing is
+//! `not_found`, one that may not be opened `forbidden`, any other file failure `internal`.
 
 use std::time::Duration;
 
@@ -52,6 +53,15 @@ pub enum Error {
         /// The last attempt's error.
         #[source]
         last: Box<Error>,
+    },
+    /// A local file could not be read or written.
+    #[error("cannot use {what}")]
+    Io {
+        /// Which file, e.g. "the file to upload".
+        what: &'static str,
+        /// The operating system's error.
+        #[source]
+        source: std::io::Error,
     },
     /// The client could not be set up.
     #[error("the client cannot be set up: {what}")]
@@ -110,6 +120,11 @@ impl Error {
                 .unwrap_or_else(|| status_category(*status)),
             Self::Timeout(_) => ErrorCategory::Timeout,
             Self::Transport(_) => ErrorCategory::Unavailable,
+            Self::Io { source, .. } => match source.kind() {
+                std::io::ErrorKind::NotFound => ErrorCategory::NotFound,
+                std::io::ErrorKind::PermissionDenied => ErrorCategory::Forbidden,
+                _ => ErrorCategory::Internal,
+            },
             Self::InvalidResponse { .. } | Self::Setup { .. } => ErrorCategory::Internal,
             Self::RetriesExhausted { last, .. } => last.category(),
         }
@@ -129,6 +144,7 @@ impl Error {
             }
             Self::InvalidArgument { .. }
             | Self::InvalidResponse { .. }
+            | Self::Io { .. }
             | Self::RetriesExhausted { .. }
             | Self::Setup { .. } => false,
         }

@@ -1,4 +1,4 @@
-//! Object operations with bodies held in memory. Files are streamed by the transfer layer, not here.
+//! Object operations with bodies held in memory. Files are streamed in `files`.
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
@@ -8,7 +8,7 @@ use reqwest::header::HeaderMap;
 use super::Client;
 use crate::constants::LIST_MAX_KEYS;
 use crate::sign::uri_encode;
-use crate::transport::Request;
+use crate::transport::{Payload, Request};
 use crate::{BucketName, ListObjects, ListPage, ObjectInfo, ObjectKey};
 use crate::{Error, Result, xml};
 
@@ -26,7 +26,7 @@ impl Client {
         content_type: Option<&str>,
     ) -> Result<String> {
         let mut request = Request::new(Method::PUT, Some(bucket), Some(key));
-        request.body = body.into();
+        request.payload = Payload::Memory(body.into());
         if let Some(content_type) = content_type {
             request
                 .headers
@@ -160,7 +160,7 @@ fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
-fn etag(headers: &HeaderMap) -> Result<String> {
+pub(super) fn etag(headers: &HeaderMap) -> Result<String> {
     header(headers, "etag")
         .map(str::to_owned)
         .ok_or(Error::InvalidResponse {

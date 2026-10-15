@@ -5,6 +5,9 @@ Semantic Versioning.
 
 ## Unreleased
 
+- `upload_file` and `download_file`: files up to 5 GiB streamed from and to disk in 1 MiB chunks, the upload signed
+  with the file's SHA-256, the download written beside the target and renamed into place only when complete. Large
+  transfers are bounded by a 60-second read inactivity timeout instead of a total one.
 - `Client` and `ClientBuilder`: bucket calls (create, delete, exists, list) and object calls (put, get, head, delete,
   copy, list one page in byte order) over HTTPS with the platform's trust store, path-style addressing, every request
   signed when it is sent. Bodies are held in memory for now.
