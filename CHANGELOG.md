@@ -7,12 +7,6 @@ Semantic Versioning.
 
 The first version on crates.io; the library is unchanged from 0.1.0.
 
-- README: says where the library is published and how to get the command line.
-
-- README: the notice at the top described the library before multipart, presigned links and the command line
-  existed — "streams files up to 5 GiB", "not published", "still to come". It now states what 0.1.0 does: files up
-  to 48.8 TiB (in parts above 16 MiB; 5 GiB is S3's limit for one PUT, not this client's).
-
 ## 0.1.0 — 2026-10-15
 
 The first release: the library and the command line.
