@@ -1,0 +1,23 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local agent-tooling state, never published
+.bgv
+.bgv/
+.githooks/
+CLAUDE.md
+AGENTS.md
+MEMORY.md

@@ -1,0 +1,18 @@
+[package]
+name = "tessaridb-s3-client"
+description = "An async Rust client for S3-compatible object storage, built for moving files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["s3", "object-storage", "tessaridb", "sigv4", "client"]
+categories = ["api-bindings", "network-programming", "filesystem"]
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

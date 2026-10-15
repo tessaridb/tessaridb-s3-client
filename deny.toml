@@ -1,0 +1,32 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace's own crates are path dependencies; a registry wildcard is still refused.
+allow-wildcard-paths = true
+
+[licenses]
+version = 2
+# Licences acceptable in dependencies of an Apache-2.0 library that others embed: permissive only. A copyleft or
+# source-available dependency would change the terms of every program that adds this crate, so it is refused.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+]
+private = { ignore = true }
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
