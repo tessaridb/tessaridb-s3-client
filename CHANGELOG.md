@@ -3,7 +3,10 @@
 All notable changes to this project are recorded here. The format follows Keep a Changelog, and versions follow
 Semantic Versioning.
 
-## Unreleased
+## 0.1.0 — 2026-10-15
+
+The first release: the library and the command line.
+
 
 - `tessaridb-s3-cli`: `ls`, `stat`, `presign`, `mb`, `rb`, `cp`, `mv`, `rm` and `sync` over the library. Credentials
   come from the environment or an owner-only profile file, never from an argument. Commands that change data take
@@ -25,7 +28,8 @@ Semantic Versioning.
   transfers are bounded by a 60-second read inactivity timeout instead of a total one.
 - `Client` and `ClientBuilder`: bucket calls (create, delete, exists, list) and object calls (put, get, head, delete,
   copy, list one page in byte order) over HTTPS with the platform's trust store, path-style addressing, every request
-  signed when it is sent. Bodies are held in memory for now.
+  signed when it is sent. `put_object` and `get_object` hold the body in memory; files go through
+  `upload_file` and `download_file`.
 - `BucketName` and `ObjectKey` check the S3 naming rules when they are made; a key with a `.` or `..` path segment is
   refused, because a URL would collapse it.
 - `Error` gains a category (`ErrorCategory`), the server's S3 code, status and request ID, and a retry class:

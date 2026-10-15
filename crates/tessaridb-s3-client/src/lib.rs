@@ -2,8 +2,11 @@
 //! without holding them in memory, large ones in parts that survive an interrupted transfer, and links that grant one
 //! object for a bounded time.
 //!
-//! The crate is being built. What works today: [`Client`] with bucket and object calls on bodies held in memory,
-//! signed with SigV4, retried when the failure is transient. The repository's README tracks the rest.
+//! [`Client`] covers buckets and objects, signed with SigV4 and retried when a failure is transient. Files stream from
+//! and to disk (`upload_file`, `download_file`); files over 16 MiB go up in parts that `resume_upload` can finish
+//! after an interruption, and a broken download continues from its last byte. Every upload declares its CRC64NVME and
+//! every download is checked against the checksums the server keeps. `presign_get` and `presign_put` make links for
+//! one request. Errors carry a category to branch on ([`ErrorCategory`]).
 //!
 //! The library starts no runtime of its own: its calls are futures for the caller's tokio runtime.
 //!

@@ -31,6 +31,9 @@ the server's licence reaches a program that embeds this one.
 
 ## Status
 
+Versions follow semantic versioning; before 1.0, a minor release (0.x → 0.y) may change the interface, and the
+CHANGELOG says how.
+
 | Part | State |
 |---|---|
 | Workspace, licence, checks | in place |
