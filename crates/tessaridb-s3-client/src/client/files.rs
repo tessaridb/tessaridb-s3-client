@@ -79,42 +79,99 @@ impl Client {
         path: impl AsRef<Path>,
     ) -> Result<u64> {
         let path = path.as_ref();
+        // Held for the whole of one attempt, across its awaits; attempts run one after another, so it is never
+        // contended — it carries the part file and what has been received from one attempt to the next.
+        let progress = tokio::sync::Mutex::new(None);
+        let progress = &progress;
         self.retry
-            .run(|_| self.download_once(bucket, key, path))
+            .run(|_| async move {
+                let mut progress = progress.lock().await;
+                self.download_attempt(bucket, key, path, &mut progress)
+                    .await
+            })
             .await
     }
 
-    async fn download_once(
+    /// One attempt: a fresh download, or — when an earlier attempt left bytes in the part file — the rest of the same
+    /// object (`Range` from the first missing byte, `If-Match` its ETag).
+    async fn download_attempt(
         &self,
         bucket: &BucketName,
         key: &ObjectKey,
         path: &Path,
+        progress: &mut Option<Progress>,
     ) -> Result<u64> {
         let mut request = Request::new(Method::GET, Some(bucket), Some(key));
         request.headers.push(checksum_mode());
+        // Continuing needs the ETag, so the server can refuse if the object changed in between.
+        let resume_from = progress
+            .as_ref()
+            .filter(|so_far| so_far.written > 0)
+            .and_then(|so_far| so_far.etag.clone().map(|etag| (so_far.written, etag)));
+        if let Some((from, etag)) = &resume_from {
+            request
+                .headers
+                .push(("range".to_owned(), format!("bytes={from}-")));
+            request.headers.push(("if-match".to_owned(), etag.clone()));
+        }
         let mut answer = self.transport.open(&request).await?;
-        let expected = answer.content_length();
-        let mut verifier = Verifier::from_headers(answer.headers());
-        let mut part = PartFile::create(path).await?;
-        let mut written: u64 = 0;
+        match (&resume_from, answer.status().as_u16()) {
+            (Some((from, _)), 206) => {
+                let range = answer
+                    .headers()
+                    .get("content-range")
+                    .and_then(|value| value.to_str().ok());
+                if !range.is_some_and(|range| range.starts_with(&format!("bytes {from}-"))) {
+                    return Err(Error::InvalidResponse {
+                        what: "a resumed body that does not start where the last one stopped",
+                    });
+                }
+            }
+            _ => {
+                let etag = answer
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_owned);
+                *progress = Some(Progress {
+                    total: answer.content_length(),
+                    verifier: Verifier::from_headers(answer.headers()),
+                    part: PartFile::create(path).await?,
+                    written: 0,
+                    etag,
+                });
+            }
+        }
+        let so_far = progress.as_mut().ok_or(Error::InvalidResponse {
+            what: "a download with nothing to continue",
+        })?;
         while let Some(chunk) = answer.chunk().await.map_err(transport_error)? {
-            verifier.update(&chunk);
-            part.file.write_all(&chunk).await.map_err(to_download)?;
-            written = u64::try_from(chunk.len())
+            so_far.verifier.update(&chunk);
+            so_far
+                .part
+                .file
+                .write_all(&chunk)
+                .await
+                .map_err(to_download)?;
+            so_far.written = u64::try_from(chunk.len())
                 .ok()
-                .and_then(|length| written.checked_add(length))
+                .and_then(|length| so_far.written.checked_add(length))
                 .ok_or(Error::InvalidResponse {
                     what: "a body over 2^64 bytes",
                 })?;
         }
-        if expected.is_some_and(|expected| expected != written) {
+        // Whatever happens next, this download does not continue: a mismatch starts the next attempt afresh.
+        let done = progress.take().ok_or(Error::InvalidResponse {
+            what: "a download with nothing to continue",
+        })?;
+        if done.total.is_some_and(|total| total != done.written) {
             return Err(Error::InvalidResponse {
                 what: "a body shorter or longer than its Content-Length",
             });
         }
-        verifier.finish()?;
-        part.commit().await?;
-        Ok(written)
+        done.verifier.finish()?;
+        done.part.commit().await?;
+        Ok(done.written)
     }
 }
 
@@ -155,6 +212,17 @@ async fn digests_of(path: PathBuf) -> Result<(String, String)> {
     .map_err(|_| Error::Setup {
         what: "the hashing task",
     })?
+}
+
+/// What a download has received so far, kept across attempts so a broken transfer continues where it stopped.
+struct Progress {
+    part: PartFile,
+    written: u64,
+    /// The object's length, from the first answer.
+    total: Option<u64>,
+    /// The object's ETag; without one a broken transfer starts again instead of continuing.
+    etag: Option<String>,
+    verifier: Verifier,
 }
 
 /// A temporary file beside its target: renamed onto the target by `commit`, removed if dropped before that — also

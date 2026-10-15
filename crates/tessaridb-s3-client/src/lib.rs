@@ -31,6 +31,8 @@ mod error;
 mod object;
 mod retry;
 pub mod sign;
+#[cfg(test)]
+mod test_server;
 mod transport;
 mod xml;
 

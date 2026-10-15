@@ -106,3 +106,59 @@ async fn one_read_plans_every_part_and_the_whole_file() -> crate::Result<()> {
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn parts_that_keep_failing_transiently_leave_the_upload_open_to_resume() -> crate::Result<()>
+{
+    use crate::sign::Credentials;
+    use crate::test_server::{response, serve};
+    use crate::{BucketName, ClientBuilder, ErrorCategory, ObjectKey};
+    let (endpoint, seen, server) = serve(|_, head| {
+        if head.starts_with("post") && head.contains("?uploads") {
+            let body = b"<InitiateMultipartUploadResult><UploadId>fake-id</UploadId></InitiateMultipartUploadResult>";
+            response("200 OK", &[], body, body.len())
+        } else if head.starts_with("get") {
+            let body = b"<ListPartsResult><IsTruncated>false</IsTruncated></ListPartsResult>";
+            response("200 OK", &[], body, body.len())
+        } else {
+            let body = b"<Error><Code>SlowDown</Code><Message>slow</Message></Error>";
+            response("503 Slow Down", &[], body, body.len())
+        }
+    })
+    .await?;
+    let directory = tempfile::tempdir().map_err(|source| Error::Io {
+        what: "a test directory",
+        source,
+    })?;
+    let path = directory.path().join("big");
+    std::fs::write(&path, vec![7_u8; usize::try_from(17 * MIB).unwrap_or(0)]).map_err(
+        |source| Error::Io {
+            what: "the file",
+            source,
+        },
+    )?;
+    let client = ClientBuilder::new(&endpoint, Credentials::new("a", "b")).build()?;
+    let result = client
+        .upload_file(
+            &BucketName::new("bucket")?,
+            &ObjectKey::new("big")?,
+            &path,
+            None,
+        )
+        .await;
+    match &result {
+        Err(error @ Error::UploadInterrupted { upload_id, .. }) => {
+            assert_eq!(upload_id, "fake-id");
+            assert_eq!(error.category(), ErrorCategory::Unavailable);
+            assert_eq!(error.s3_code(), Some("SlowDown"));
+        }
+        other => panic!("expected an interrupted upload, got {other:?}"),
+    }
+    let heads = seen.lock().map(|heads| heads.clone()).unwrap_or_default();
+    assert!(
+        !heads.iter().any(|head| head.starts_with("delete")),
+        "the upload was aborted: {heads:?}"
+    );
+    server.abort();
+    Ok(())
+}

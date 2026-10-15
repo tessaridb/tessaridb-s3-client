@@ -40,8 +40,8 @@ the server's licence reaches a program that embeds this one.
 | Files: upload and download streamed from and to disk | done; files over 16 MiB go up in parts (8 MiB or larger, four at a time) |
 | Multipart: resume by upload ID, abort | done |
 | Checksums | done: uploads carry their CRC64NVME; downloads are checked against every whole-object checksum the server keeps (CRC32, CRC32C, CRC64NVME, SHA-1, SHA-256) and retried on a mismatch |
-| Presigned links | signing done; client calls not started |
-| Download resume (ranged retry) | not started |
+| Presigned links (`presign_get`, `presign_put`) | done |
+| Download resume (ranged retry) | done |
 | Command line (`ls`, `cp`, `mv`, `rm`, `mb`, `rb`, `stat`, `presign`, `sync`) | not started |
 
 ## Using the library
@@ -80,6 +80,12 @@ let page = client.list_objects(&bucket, &ListObjects::default()).await?;
   If parts keep failing on a transient error, `upload_file` returns `UploadInterrupted` carrying the upload ID and
   leaves the upload open: `resume_upload` with that ID sends only the parts the server does not already hold intact,
   and `abort_upload` discards it. A permanent failure aborts the upload.
+- **Downloads continue where they stopped.** When a transfer breaks, the next attempt asks only for the bytes still
+  missing (`Range`, with `If-Match` on the object's ETag so a changed object is refused rather than spliced) and
+  continues the same `.part` file and the same checksum.
+- **Presigned links** (`presign_get`, `presign_put`) let anyone holding the URL make that one request — with any
+  plain HTTP client — for 1 second to 7 days. A `PUT` link does not sign the body: it accepts any bytes until it
+  expires, so share it only with whoever should write that key.
 - **Integrity is checked end to end.** Every upload declares its CRC64NVME, which the server verifies and keeps;
   every download asks for the checksums the server keeps and checks the bytes against each one that covers the whole
   object. A body that does not match is never handed over or written into place — the download is tried again, and

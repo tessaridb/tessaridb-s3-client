@@ -433,3 +433,55 @@ async fn an_upload_is_resumed_by_its_id_and_an_aborted_one_is_gone() -> Result<(
     );
     empty_and_delete(&client, &bucket).await
 }
+
+#[tokio::test]
+async fn presigned_links_carry_one_request_and_a_tampered_one_is_refused() -> Result<()> {
+    let Some(client) = client()? else {
+        return Ok(());
+    };
+    let bucket = unique_bucket("presign")?;
+    client.create_bucket(&bucket).await?;
+    let key = ObjectKey::new("shared/a b+c.txt")?;
+    let ten_minutes = std::time::Duration::from_secs(600);
+    // A plain HTTP client, as a browser or a script holding the link would be; it needs a TLS provider chosen.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let plain = reqwest::Client::new();
+    let transport = |source: reqwest::Error| Error::Io {
+        what: "a plain HTTP request",
+        source: std::io::Error::other(source),
+    };
+    let put_url = client.presign_put(&bucket, &key, ten_minutes)?;
+    let put = plain
+        .put(&put_url)
+        .body("posted through a link")
+        .send()
+        .await
+        .map_err(transport)?;
+    assert_eq!(put.status().as_u16(), 200);
+    let get_url = client.presign_get(&bucket, &key, ten_minutes)?;
+    let got = plain.get(&get_url).send().await.map_err(transport)?;
+    assert_eq!(got.status().as_u16(), 200);
+    assert_eq!(
+        got.bytes().await.map_err(transport)?.as_ref(),
+        b"posted through a link"
+    );
+    let mut tampered = get_url.clone();
+    let last = tampered
+        .pop()
+        .map_or('0', |c| if c == '0' { '1' } else { '0' });
+    tampered.push(last);
+    let refused = plain.get(&tampered).send().await.map_err(transport)?;
+    assert_eq!(refused.status().as_u16(), 403);
+    let as_put = plain
+        .put(&get_url)
+        .body("not allowed")
+        .send()
+        .await
+        .map_err(transport)?;
+    assert_eq!(as_put.status().as_u16(), 403);
+    assert!(matches!(
+        client.presign_get(&bucket, &key, std::time::Duration::ZERO),
+        Err(Error::InvalidArgument { .. })
+    ));
+    empty_and_delete(&client, &bucket).await
+}

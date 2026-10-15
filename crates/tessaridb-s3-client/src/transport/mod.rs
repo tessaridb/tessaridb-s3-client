@@ -20,6 +20,7 @@ use crate::{BucketName, ObjectKey};
 use crate::{Error, Result, xml};
 
 mod payload;
+mod presign;
 
 pub(crate) use payload::Payload;
 use payload::body;

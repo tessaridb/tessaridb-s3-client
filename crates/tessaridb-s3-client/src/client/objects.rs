@@ -183,6 +183,38 @@ pub(super) fn checksum_mode() -> (String, String) {
     ("x-amz-checksum-mode".to_owned(), "ENABLED".to_owned())
 }
 
+impl Client {
+    /// A URL that lets whoever holds it download `bucket/key` with a plain `GET`, for `expires` (1 second to 7 days)
+    /// from now. It is signed with this client's credentials and grants that one request and nothing else.
+    ///
+    /// # Errors
+    /// [`Error::InvalidArgument`] for a lifetime outside 1 second to 7 days.
+    pub fn presign_get(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        expires: std::time::Duration,
+    ) -> Result<String> {
+        self.transport
+            .presign("GET", bucket, key, expires.as_secs())
+    }
+
+    /// A URL that lets whoever holds it upload one body as `bucket/key` with a plain `PUT`, for `expires` (1 second to
+    /// 7 days) from now. The body is not signed: the URL authorises any bytes until it expires.
+    ///
+    /// # Errors
+    /// [`Error::InvalidArgument`] for a lifetime outside 1 second to 7 days.
+    pub fn presign_put(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        expires: std::time::Duration,
+    ) -> Result<String> {
+        self.transport
+            .presign("PUT", bucket, key, expires.as_secs())
+    }
+}
+
 fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }

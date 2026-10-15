@@ -157,3 +157,75 @@ async fn a_body_that_does_not_match_its_checksum_is_retried_and_never_handed_ove
     server.abort();
     Ok(())
 }
+
+/// Bytes from xorshift64, so no window repeats.
+fn pseudo_random(length: usize) -> Vec<u8> {
+    let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+    (0..length)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state.to_be_bytes()[0]
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_download_cut_off_midway_resumes_from_the_first_missing_byte() -> crate::Result<()> {
+    use crate::test_server::{response, serve};
+    let object = pseudo_random(300_000);
+    let half = object.len() / 2;
+    let crc = crc64nvme(&object);
+    let served = object.clone();
+    let (endpoint, seen, server) = serve(move |index, _| {
+        let etag = ("etag", "\"e1\"".to_owned());
+        if index == 0 {
+            // The whole object announced, half of it sent, then the connection closes.
+            response(
+                "200 OK",
+                &[etag, ("x-amz-checksum-crc64nvme", crc.clone())],
+                &served[..half],
+                served.len(),
+            )
+        } else {
+            let range = (
+                "content-range",
+                format!("bytes {half}-{}/{}", served.len() - 1, served.len()),
+            );
+            response(
+                "206 Partial Content",
+                &[etag, range],
+                &served[half..],
+                served.len() - half,
+            )
+        }
+    })
+    .await?;
+    let client = ClientBuilder::new(&endpoint, Credentials::new("a", "b")).build()?;
+    let directory = tempfile::tempdir().map_err(|source| Error::Io {
+        what: "a test directory",
+        source,
+    })?;
+    let target = directory.path().join("object");
+    let written = client
+        .download_file(
+            &BucketName::new("bucket")?,
+            &ObjectKey::new("key")?,
+            &target,
+        )
+        .await?;
+    assert_eq!(written, u64::try_from(object.len()).unwrap_or(0));
+    assert!(std::fs::read(&target).ok().as_deref() == Some(object.as_slice()));
+    let heads = seen.lock().map(|heads| heads.clone()).unwrap_or_default();
+    assert_eq!(heads.len(), 2, "{heads:?}");
+    assert!(
+        heads[1].contains(&format!("range: bytes={half}-")),
+        "{}",
+        heads[1]
+    );
+    assert!(heads[1].contains("if-match: \"e1\""), "{}", heads[1]);
+    assert_eq!(names(directory.path()), vec!["object".to_owned()]);
+    server.abort();
+    Ok(())
+}

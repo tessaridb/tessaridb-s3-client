@@ -5,6 +5,9 @@ Semantic Versioning.
 
 ## Unreleased
 
+- `presign_get` and `presign_put`: path-style presigned URLs for one request, 1 second to 7 days.
+- `download_file` resumes a broken transfer: the next attempt requests the missing range with `If-Match` on the
+  object's ETag and continues the same part file and checksum.
 - Multipart: `upload_file` sends files over 16 MiB in parts (one planning read, four parts in flight, whole-file
   CRC64NVME checked by the server at completion); `begin_upload`, `resume_upload` (sends only the parts the server
   does not hold intact) and `abort_upload`; a transient failure leaves the upload open as `UploadInterrupted`.
