@@ -6,15 +6,17 @@
 
 **An async Rust SDK and a command line for S3-compatible object storage, built for moving files.**
 
-[![status](https://img.shields.io/badge/status-0.1.0%20pre--1.0-D98E33?style=flat-square)](#status)
+[![status](https://img.shields.io/badge/status-0.1.1%20pre--1.0-D98E33?style=flat-square)](#status)
 [![licence](https://img.shields.io/badge/licence-Apache--2.0-6B5FD1?style=flat-square)](LICENSE)
 
 </div>
 
 > [!NOTE]
-> **Version 0.1.0, pre-1.0.** The library and the command line cover buckets, objects, files of any size S3 accepts
-> (up to 48.8 TiB, sent in parts above 16 MiB), resumable transfers, end-to-end checksums and presigned links. Before
-> 1.0 a minor release may change the interface; the CHANGELOG says how. See [**Status**](#status).
+> **Version 0.1.1, pre-1.0.** The library is published on [crates.io](https://crates.io/crates/tessaridb-s3-client)
+> as `tessaridb-s3-client`; the command line is built from this repository. Both cover buckets, objects, files of any
+> size S3 accepts (up to 48.8 TiB, sent in parts above 16 MiB), resumable transfers, end-to-end checksums and
+> presigned links. Before 1.0 a minor release may change the interface; the CHANGELOG says how. See
+> [**Status**](#status).
 
 Two crates live here:
 
@@ -47,6 +49,13 @@ CHANGELOG says how.
 | Presigned links (`presign_get`, `presign_put`) | done |
 | Download resume (ranged retry) | done |
 | Command line (`ls`, `cp`, `mv`, `rm`, `mb`, `rb`, `stat`, `presign`, `sync`) | done: `tessaridb-s3-cli` |
+
+## Installing
+
+```sh
+cargo add tessaridb-s3-client                                   # the library, from crates.io
+cargo install --git https://github.com/tessaridb/tessaridb-s3-client --tag v0.1.1 tessaridb-s3-cli   # the command line
+```
 
 ## Using the library
 
