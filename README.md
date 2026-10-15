@@ -38,7 +38,8 @@ the server's licence reaches a program that embeds this one.
 | Buckets (create, delete, exists, list) and objects (put, get, head, delete, copy, list) | done, bodies held in memory; retried on transient failures |
 | Errors | one `Error` type: a category to branch on, the S3 code, status and request ID kept |
 | Files: upload and download streamed from and to disk | done, up to 5 GiB per file in one request |
-| Files: multipart with resume, presigned links, checksums | not started |
+| Checksums | done: uploads carry their CRC64NVME; downloads are checked against every whole-object checksum the server keeps (CRC32, CRC32C, CRC64NVME, SHA-1, SHA-256) and retried on a mismatch |
+| Files: multipart with resume, presigned links | not started |
 | Command line (`ls`, `cp`, `mv`, `rm`, `mb`, `rb`, `stat`, `presign`, `sync`) | not started |
 
 ## Using the library
@@ -72,6 +73,10 @@ let page = client.list_objects(&bucket, &ListObjects::default()).await?;
   file beside the target and renames it into place only when the whole object arrived; on any failure, including a
   cancelled future, the target is left as it was. A transfer fails when nothing arrives for 60 seconds, however long
   the whole transfer takes.
+- **Integrity is checked end to end.** Every upload declares its CRC64NVME, which the server verifies and keeps;
+  every download asks for the checksums the server keeps and checks the bytes against each one that covers the whole
+  object. A body that does not match is never handed over or written into place — the download is tried again, and
+  `ChecksumMismatch` is reported if it keeps failing.
 
 ## Building
 

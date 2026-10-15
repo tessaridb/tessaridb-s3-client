@@ -11,15 +11,16 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt as _;
 
 use super::Client;
-use super::objects::etag;
+use super::objects::{checksum_mode, etag, upload_checksum};
+use crate::checksum::{Crc64Nvme, UPLOAD_ALGORITHM, Verifier};
 use crate::constants::{FILE_CHUNK_BYTES, SINGLE_PUT_MAX_BYTES};
 use crate::sign::hex;
 use crate::transport::{Payload, Request, transport_error};
 use crate::{BucketName, Error, ObjectKey, Result};
 
 impl Client {
-    /// Uploads the file at `path` as `bucket/key` and returns its ETag. The body is signed with the file's SHA-256,
-    /// so the server stores it only if every byte arrived as hashed.
+    /// Uploads the file at `path` as `bucket/key` and returns its ETag. The body is signed with the file's SHA-256
+    /// and carries its CRC64NVME, so the server stores it only if every byte arrived as hashed.
     ///
     /// # Errors
     /// [`Error::Io`] when the file cannot be read; [`Error::InvalidArgument`] for a file over 5 GiB (larger files go
@@ -39,8 +40,13 @@ impl Client {
                 rule: "at most 5 GiB in one request",
             });
         }
-        let sha256 = sha256_of(path.clone()).await?;
+        let (sha256, crc) = digests_of(path.clone()).await?;
         let mut request = Request::new(Method::PUT, Some(bucket), Some(key));
+        request.headers.push(upload_checksum(crc));
+        request.headers.push((
+            "x-amz-sdk-checksum-algorithm".to_owned(),
+            UPLOAD_ALGORITHM.to_owned(),
+        ));
         request.payload = Payload::File {
             path,
             length,
@@ -60,7 +66,7 @@ impl Client {
     }
 
     /// Downloads `bucket/key` to the file at `path`, replacing it, and returns the number of bytes written. Nothing
-    /// is written to `path` unless the whole object arrived.
+    /// is written to `path` unless the whole object arrived and matched every whole-object checksum the server keeps.
     ///
     /// # Errors
     /// `NotFound` for a missing object; [`Error::Io`] when the file cannot be written; [`Error::InvalidResponse`]
@@ -83,14 +89,15 @@ impl Client {
         key: &ObjectKey,
         path: &Path,
     ) -> Result<u64> {
-        let mut answer = self
-            .transport
-            .open(&Request::new(Method::GET, Some(bucket), Some(key)))
-            .await?;
+        let mut request = Request::new(Method::GET, Some(bucket), Some(key));
+        request.headers.push(checksum_mode());
+        let mut answer = self.transport.open(&request).await?;
         let expected = answer.content_length();
+        let mut verifier = Verifier::from_headers(answer.headers());
         let mut part = PartFile::create(path).await?;
         let mut written: u64 = 0;
         while let Some(chunk) = answer.chunk().await.map_err(transport_error)? {
+            verifier.update(&chunk);
             part.file.write_all(&chunk).await.map_err(to_download)?;
             written = u64::try_from(chunk.len())
                 .ok()
@@ -104,6 +111,7 @@ impl Client {
                 what: "a body shorter or longer than its Content-Length",
             });
         }
+        verifier.finish()?;
         part.commit().await?;
         Ok(written)
     }
@@ -123,20 +131,24 @@ fn to_download(source: std::io::Error) -> Error {
     }
 }
 
-/// The SHA-256 of the file at `path`, as lowercase hex, read on a blocking thread.
-async fn sha256_of(path: PathBuf) -> Result<String> {
+/// The SHA-256 (lowercase hex) and CRC64NVME (base64) of the file at `path`, read once on a blocking thread.
+async fn digests_of(path: PathBuf) -> Result<(String, String)> {
     tokio::task::spawn_blocking(move || {
         let mut file = std::fs::File::open(&path).map_err(to_upload)?;
         let mut hasher = Sha256::new();
+        let mut crc = Crc64Nvme::new();
         let mut buffer = vec![0_u8; FILE_CHUNK_BYTES];
         loop {
             let read = file.read(&mut buffer).map_err(to_upload)?;
             match buffer.get(..read) {
                 Some([]) | None => break,
-                Some(bytes) => hasher.update(bytes),
+                Some(bytes) => {
+                    hasher.update(bytes);
+                    crc.update(bytes);
+                }
             }
         }
-        Ok(hex(&hasher.finalize()))
+        Ok((hex(&hasher.finalize()), crc.finish()))
     })
     .await
     .map_err(|_| Error::Setup {

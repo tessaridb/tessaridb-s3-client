@@ -6,6 +6,7 @@ use reqwest::Method;
 use reqwest::header::HeaderMap;
 
 use super::Client;
+use crate::checksum::{UPLOAD_ALGORITHM, UPLOAD_HEADER, Verifier, crc64nvme};
 use crate::constants::LIST_MAX_KEYS;
 use crate::sign::uri_encode;
 use crate::transport::{Payload, Request};
@@ -13,8 +14,8 @@ use crate::{BucketName, ListObjects, ListPage, ObjectInfo, ObjectKey};
 use crate::{Error, Result, xml};
 
 impl Client {
-    /// Stores `body` as `bucket/key`, replacing any object there, and returns its ETag (quoted). The body is signed:
-    /// the server stores it only if its SHA-256 matches.
+    /// Stores `body` as `bucket/key`, replacing any object there, and returns its ETag (quoted). The body is signed
+    /// and carries its CRC64NVME: the server stores it only if both match, and keeps the checksum for later reads.
     ///
     /// # Errors
     /// The server's refusal, or a transport failure after retries.
@@ -25,8 +26,14 @@ impl Client {
         body: impl Into<Bytes>,
         content_type: Option<&str>,
     ) -> Result<String> {
+        let body: Bytes = body.into();
         let mut request = Request::new(Method::PUT, Some(bucket), Some(key));
-        request.payload = Payload::Memory(body.into());
+        request.headers.push(upload_checksum(crc64nvme(&body)));
+        request.headers.push((
+            "x-amz-sdk-checksum-algorithm".to_owned(),
+            UPLOAD_ALGORITHM.to_owned(),
+        ));
+        request.payload = Payload::Memory(body);
         if let Some(content_type) = content_type {
             request
                 .headers
@@ -36,25 +43,32 @@ impl Client {
         etag(&response.headers)
     }
 
-    /// The whole of `bucket/key` in memory.
+    /// The whole of `bucket/key` in memory, checked against every whole-object checksum the server keeps for it.
     ///
     /// # Errors
-    /// `NotFound` (`NoSuchKey`, `NoSuchBucket`), or another refusal.
+    /// `NotFound` (`NoSuchKey`, `NoSuchBucket`), [`Error::ChecksumMismatch`] after retries, or another refusal.
     pub async fn get_object(&self, bucket: &BucketName, key: &ObjectKey) -> Result<Bytes> {
-        let response = self
-            .call(&Request::new(Method::GET, Some(bucket), Some(key)))
-            .await?;
-        Ok(response.body)
+        let mut request = Request::new(Method::GET, Some(bucket), Some(key));
+        request.headers.push(checksum_mode());
+        let request = &request;
+        self.retry
+            .run(|_| async move {
+                let response = self.transport.send(request).await?;
+                let mut verifier = Verifier::from_headers(&response.headers);
+                verifier.update(&response.body);
+                verifier.finish().map(|()| response.body)
+            })
+            .await
     }
 
-    /// The metadata of `bucket/key` without its body.
+    /// The metadata of `bucket/key` without its body, with the whole-object CRC64NVME when the server keeps one.
     ///
     /// # Errors
     /// `NotFound` (an answer to `HEAD` carries no code), or another refusal.
     pub async fn head_object(&self, bucket: &BucketName, key: &ObjectKey) -> Result<ObjectInfo> {
-        let response = self
-            .call(&Request::new(Method::HEAD, Some(bucket), Some(key)))
-            .await?;
+        let mut request = Request::new(Method::HEAD, Some(bucket), Some(key));
+        request.headers.push(checksum_mode());
+        let response = self.call(&request).await?;
         let size = header(&response.headers, "content-length")
             .and_then(|length| length.parse().ok())
             .ok_or(Error::InvalidResponse {
@@ -74,6 +88,9 @@ impl Client {
             size,
             etag: etag(&response.headers)?,
             last_modified,
+            crc64nvme: header(&response.headers, UPLOAD_HEADER)
+                .filter(|value| !value.contains('-'))
+                .map(str::to_owned),
         })
     }
 
@@ -154,6 +171,16 @@ impl Client {
         let response = self.call(&request).await?;
         xml::list_objects_v2(&response.body)
     }
+}
+
+/// The header declaring an upload's CRC64NVME.
+pub(super) fn upload_checksum(value: String) -> (String, String) {
+    (UPLOAD_HEADER.to_owned(), value)
+}
+
+/// The header asking the server to return the checksums it keeps.
+pub(super) fn checksum_mode() -> (String, String) {
+    ("x-amz-checksum-mode".to_owned(), "ENABLED".to_owned())
 }
 
 fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {

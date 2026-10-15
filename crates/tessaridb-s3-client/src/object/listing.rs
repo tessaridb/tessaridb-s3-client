@@ -16,6 +16,8 @@ pub struct ObjectInfo {
     pub etag: String,
     /// When the object was last written, when the server says.
     pub last_modified: Option<DateTime<Utc>>,
+    /// The CRC64NVME the server keeps for the whole object (base64), from `HEAD`; listings do not carry it.
+    pub crc64nvme: Option<String>,
 }
 
 /// One page of a `ListObjectsV2` listing, in the UTF-8 byte order of the keys.

@@ -24,6 +24,7 @@
 //! ```
 
 mod bucket;
+mod checksum;
 mod client;
 mod constants;
 mod error;

@@ -141,3 +141,16 @@ fn a_local_file_failure_is_categorised_by_its_kind_and_never_retried() {
         "cannot use the file to upload"
     );
 }
+
+#[test]
+fn a_checksum_mismatch_is_a_retryable_unavailable_error() {
+    let error = Error::ChecksumMismatch {
+        algorithm: "CRC64NVME",
+    };
+    assert_eq!(error.category(), ErrorCategory::Unavailable);
+    assert!(error.is_retryable());
+    assert_eq!(
+        error.to_string(),
+        "the body does not match its CRC64NVME checksum"
+    );
+}

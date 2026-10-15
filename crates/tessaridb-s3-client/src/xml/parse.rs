@@ -63,6 +63,7 @@ pub(crate) fn list_objects_v2(body: &[u8]) -> Result<ListPage, Error> {
                     .map_err(|_| malformed("an object size that is not a number"))?,
                 etag: required(entry, "ETag")?.to_owned(),
                 last_modified: optional_time(entry, "LastModified")?,
+                crc64nvme: None,
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;

@@ -113,6 +113,10 @@ async fn an_object_round_trips_byte_for_byte_under_an_awkward_key() -> Result<()
         (u64::try_from(body.len()).unwrap_or(0), etag.as_str())
     );
     assert!(info.last_modified.is_some());
+    // The server keeps the checksum the client declared, so downloads have something to check against.
+    let crc = crc_fast::checksum(crc_fast::CrcAlgorithm::Crc64Nvme, &body).to_be_bytes();
+    let expected_crc = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, crc);
+    assert_eq!(info.crc64nvme.as_deref(), Some(expected_crc.as_str()));
     client.delete_object(&bucket, &key).await?;
     let missing = client.get_object(&bucket, &key).await;
     assert!(

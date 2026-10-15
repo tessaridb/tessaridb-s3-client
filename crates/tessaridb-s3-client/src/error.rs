@@ -5,7 +5,8 @@
 //! answer from the server keeps the S3 error code, HTTP status and request ID it carried; its category comes from the
 //! code when the code is one S3 documents, otherwise from the status. A request the server refuses as not
 //! implemented is `validation`: asking again will not help, asking differently might. A local file that is missing is
-//! `not_found`, one that may not be opened `forbidden`, any other file failure `internal`.
+//! `not_found`, one that may not be opened `forbidden`, any other file failure `internal`. A body that does not match
+//! its checksum was damaged on the way: `unavailable`, and retried.
 
 use std::time::Duration;
 
@@ -53,6 +54,12 @@ pub enum Error {
         /// The last attempt's error.
         #[source]
         last: Box<Error>,
+    },
+    /// A body did not match a checksum the server declared for it; it was not handed over or written into place.
+    #[error("the body does not match its {algorithm} checksum")]
+    ChecksumMismatch {
+        /// The algorithm whose value differed, e.g. `CRC64NVME`.
+        algorithm: &'static str,
     },
     /// A local file could not be read or written.
     #[error("cannot use {what}")]
@@ -119,6 +126,7 @@ impl Error {
                 .and_then(code_category)
                 .unwrap_or_else(|| status_category(*status)),
             Self::Timeout(_) => ErrorCategory::Timeout,
+            Self::ChecksumMismatch { .. } => ErrorCategory::Unavailable,
             Self::Transport(_) => ErrorCategory::Unavailable,
             Self::Io { source, .. } => match source.kind() {
                 std::io::ErrorKind::NotFound => ErrorCategory::NotFound,
@@ -135,7 +143,7 @@ impl Error {
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match self {
-            Self::Timeout(_) | Self::Transport(_) => true,
+            Self::Timeout(_) | Self::Transport(_) | Self::ChecksumMismatch { .. } => true,
             Self::Service { status, code, .. } => {
                 matches!(status, 429 | 500 | 502 | 503 | 504)
                     || code

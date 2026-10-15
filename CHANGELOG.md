@@ -5,6 +5,9 @@ Semantic Versioning.
 
 ## Unreleased
 
+- Checksums: `put_object` and `upload_file` declare the body's CRC64NVME; `get_object` and `download_file` check the
+  body against every whole-object checksum the server returns (CRC32, CRC32C, CRC64NVME, SHA-1, SHA-256) before
+  handing it over, retrying on `ChecksumMismatch`. `head_object` reports the stored CRC64NVME.
 - `upload_file` and `download_file`: files up to 5 GiB streamed from and to disk in 1 MiB chunks, the upload signed
   with the file's SHA-256, the download written beside the target and renamed into place only when complete. Large
   transfers are bounded by a 60-second read inactivity timeout instead of a total one.
