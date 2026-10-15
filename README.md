@@ -6,14 +6,15 @@
 
 **An async Rust SDK and a command line for S3-compatible object storage, built for moving files.**
 
-[![status](https://img.shields.io/badge/status-in%20development-D98E33?style=flat-square)](#status)
+[![status](https://img.shields.io/badge/status-0.1.0%20pre--1.0-D98E33?style=flat-square)](#status)
 [![licence](https://img.shields.io/badge/licence-Apache--2.0-6B5FD1?style=flat-square)](LICENSE)
 
 </div>
 
-> [!WARNING]
-> **Under active development.** Not published to crates.io. The library does bucket and object calls and streams
-> files up to 5 GiB; multipart, presigned links and the command line are still to come. See [**Status**](#status).
+> [!NOTE]
+> **Version 0.1.0, pre-1.0.** The library and the command line cover buckets, objects, files of any size S3 accepts
+> (up to 48.8 TiB, sent in parts above 16 MiB), resumable transfers, end-to-end checksums and presigned links. Before
+> 1.0 a minor release may change the interface; the CHANGELOG says how. See [**Status**](#status).
 
 Two crates live here:
 
