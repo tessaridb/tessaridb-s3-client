@@ -1284,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "tessaridb-s3-cli"
-version = "0.1.2"
+version = "0.1.3-beta"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1305,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "tessaridb-s3-client"
-version = "0.1.2"
+version = "0.1.3-beta"
 dependencies = [
  "base64 0.22.1",
  "bytes",
