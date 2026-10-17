@@ -98,6 +98,10 @@ impl Signer {
             ("X-Amz-Expires".to_owned(), expires_secs.to_string()),
             ("X-Amz-SignedHeaders".to_owned(), "host".to_owned()),
         ];
+        // Temporary credentials name their session in the URL, signed with the rest, so the URL dies with it.
+        if let Some(token) = self.credentials.session_token() {
+            query.push(("X-Amz-Security-Token".to_owned(), token.to_owned()));
+        }
         let canonical = canonical_request(
             method,
             path,
@@ -111,6 +115,11 @@ impl Signer {
             self.signature(&canonical, now),
         ));
         Ok(query)
+    }
+
+    /// The session token temporary credentials are presented with; `None` for long-term ones.
+    pub(crate) fn session_token(&self) -> Option<&str> {
+        self.credentials.session_token()
     }
 
     fn scope(&self, now: DateTime<Utc>) -> String {

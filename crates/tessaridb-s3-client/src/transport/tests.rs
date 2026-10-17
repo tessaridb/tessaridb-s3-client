@@ -72,3 +72,72 @@ fn the_http_client_accepts_the_tls_setup() {
     let built = super::Transport::new("https://s3.example.com", signer);
     assert!(built.is_ok(), "{built:?}");
 }
+
+const TOKEN: &str = "TSS1session-token+with/odd=bytes";
+
+fn temporary() -> crate::sign::Credentials {
+    crate::sign::Credentials::new("TSTEMPORARYKEY000001", "temporary-secret")
+        .with_session_token(TOKEN)
+}
+
+#[test]
+fn a_presigned_url_from_temporary_credentials_carries_and_signs_their_token() -> crate::Result<()> {
+    let with_token = crate::ClientBuilder::new("http://127.0.0.1:9", temporary()).build()?;
+    let without = crate::ClientBuilder::new(
+        "http://127.0.0.1:9",
+        crate::sign::Credentials::new("TSTEMPORARYKEY000001", "temporary-secret"),
+    )
+    .build()?;
+    let (bucket, key) = (BucketName::new("bucket")?, ObjectKey::new("key")?);
+    let url = with_token.presign_get(&bucket, &key, std::time::Duration::from_secs(60))?;
+    let parsed = reqwest::Url::parse(&url).map_err(|_| Error::InvalidArgument {
+        what: "test URL",
+        rule: "parses",
+    })?;
+    let token = parsed
+        .query_pairs()
+        .find(|(name, _)| name == "X-Amz-Security-Token")
+        .map(|(_, value)| value.into_owned());
+    assert_eq!(token.as_deref(), Some(TOKEN));
+    let plain = without.presign_get(&bucket, &key, std::time::Duration::from_secs(60))?;
+    assert!(!plain.contains("X-Amz-Security-Token"));
+    let signature = |url: &str| url.split("X-Amz-Signature=").nth(1).map(str::to_owned);
+    assert_ne!(
+        signature(&url),
+        signature(&plain),
+        "the token is signed with the rest"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_request_from_temporary_credentials_sends_its_token_as_a_signed_header()
+-> crate::Result<()> {
+    use crate::test_server::{response, serve};
+    let (endpoint, seen, server) = serve(|_, _| response("200 OK", &[], b"", 0)).await?;
+    let client = crate::ClientBuilder::new(&endpoint, temporary()).build()?;
+    assert!(client.bucket_exists(&BucketName::new("bucket")?).await?);
+    server.abort();
+    let heads = seen.lock().map(|heads| heads.clone()).unwrap_or_default();
+    let head = heads
+        .first()
+        .map(|head| head.to_ascii_lowercase())
+        .unwrap_or_default();
+    assert!(
+        head.contains(&format!(
+            "x-amz-security-token: {}",
+            TOKEN.to_ascii_lowercase()
+        )),
+        "{head}"
+    );
+    let signed = head
+        .split("signedheaders=")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .unwrap_or_default();
+    assert!(
+        signed.split(';').any(|name| name == "x-amz-security-token"),
+        "{signed}"
+    );
+    Ok(())
+}

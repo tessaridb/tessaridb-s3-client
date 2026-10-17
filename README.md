@@ -37,7 +37,7 @@ CHANGELOG says how.
 | Part | State |
 |---|---|
 | Workspace, licence, checks | in place |
-| Request signing (SigV4: header, presigned URL) | done in `tessaridb_s3_client::sign`, reproducing the AWS published examples |
+| Request signing (SigV4: header, presigned URL) | done in `tessaridb_s3_client::sign`, reproducing the AWS published examples; temporary credentials with `Credentials::with_session_token` |
 | Buckets (create, delete, exists, list) and objects (put, get, head, delete, copy, list) | done, bodies held in memory; retried on transient failures |
 | Errors | one `Error` type: a category to branch on, the S3 code, status and request ID kept |
 | Files: upload and download streamed from and to disk | done; files over 16 MiB go up in parts (8 MiB or larger, four at a time) |
@@ -97,7 +97,8 @@ let page = client.list_objects(&bucket, &ListObjects::default()).await?;
 ## Using the command line
 
 `tessaridb-s3-cli` does the same work from a shell. It reads the endpoint and credentials from the environment —
-`TESSARIDB_S3_ENDPOINT`, `TESSARIDB_S3_ACCESS_KEY`, `TESSARIDB_S3_SECRET_KEY`, and optionally `TESSARIDB_S3_REGION` —
+`TESSARIDB_S3_ENDPOINT`, `TESSARIDB_S3_ACCESS_KEY`, `TESSARIDB_S3_SECRET_KEY`, and optionally `TESSARIDB_S3_REGION` and
+`TESSARIDB_S3_SESSION_TOKEN` (temporary credentials; `session_token` in a profile) —
 or, when those are not set, from a profile file at `~/.config/tessaridb-s3/credentials` (`$XDG_CONFIG_HOME` when
 set), which must be readable by its owner alone (`chmod 600`):
 
