@@ -1,6 +1,7 @@
 //! Calls against a running S3 server. They run when `TESSARIDB_S3_CLIENT_TEST_ENDPOINT`,
 //! `TESSARIDB_S3_CLIENT_TEST_ACCESS_KEY` and `TESSARIDB_S3_CLIENT_TEST_SECRET_KEY` are set, and report that they were
-//! skipped otherwise. Each test makes its own bucket and removes it.
+//! skipped otherwise; with `TESSARIDB_S3_CLIENT_TEST_SESSION_TOKEN` too they run as those temporary credentials. Each
+//! test makes its own bucket and removes it.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -27,9 +28,18 @@ fn client() -> Result<Option<Client>> {
     let Some((endpoint, access, secret)) = settings() else {
         return Ok(None);
     };
-    ClientBuilder::new(&endpoint, Credentials::new(&access, &secret))
+    ClientBuilder::new(&endpoint, credentials(&access, &secret))
         .build()
         .map(Some)
+}
+
+/// `access` with `secret` — temporary credentials (an STS answer) when a session token is set beside them.
+fn credentials(access: &str, secret: &str) -> Credentials {
+    let credentials = Credentials::new(access, secret);
+    match std::env::var("TESSARIDB_S3_CLIENT_TEST_SESSION_TOKEN") {
+        Ok(token) => credentials.with_session_token(&token),
+        Err(_) => credentials,
+    }
 }
 
 fn unique_bucket(tag: &str) -> Result<BucketName> {
@@ -254,8 +264,7 @@ async fn a_wrong_secret_is_refused_as_unauthorized_and_not_retried() -> Result<(
     let Some((endpoint, access, _)) = settings() else {
         return Ok(());
     };
-    let client =
-        ClientBuilder::new(&endpoint, Credentials::new(&access, "not-the-secret")).build()?;
+    let client = ClientBuilder::new(&endpoint, credentials(&access, "not-the-secret")).build()?;
     let refused = client.list_buckets().await;
     assert!(
         matches!(&refused, Err(error @ Error::Service { .. }) if error.category() == ErrorCategory::Unauthorized),
@@ -484,4 +493,22 @@ async fn presigned_links_carry_one_request_and_a_tampered_one_is_refused() -> Re
         Err(Error::InvalidArgument { .. })
     ));
     empty_and_delete(&client, &bucket).await
+}
+
+#[tokio::test]
+async fn temporary_credentials_without_their_session_token_are_refused() -> Result<()> {
+    let (Some((endpoint, access, secret)), Ok(_)) = (
+        settings(),
+        std::env::var("TESSARIDB_S3_CLIENT_TEST_SESSION_TOKEN"),
+    ) else {
+        eprintln!("skipped: TESSARIDB_S3_CLIENT_TEST_SESSION_TOKEN is not set");
+        return Ok(());
+    };
+    let bare = ClientBuilder::new(&endpoint, Credentials::new(&access, &secret)).build()?;
+    let refused = bare.list_buckets().await;
+    assert!(
+        matches!(&refused, Err(Error::Service { status: 400, code: Some(code), .. }) if code == "InvalidToken"),
+        "{refused:?}"
+    );
+    Ok(())
 }

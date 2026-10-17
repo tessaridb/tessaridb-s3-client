@@ -1,5 +1,6 @@
-//! An access key and its secret. The secret is wiped from memory when the credentials are dropped and never appears
-//! in `Debug` output, so a logged client or a panic message does not carry it.
+//! An access key and its secret, and the session token of temporary credentials. The secret and the token are wiped
+//! from memory when the credentials are dropped and never appear in `Debug` output, so a logged client or a panic
+//! message does not carry them.
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -8,6 +9,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 pub struct Credentials {
     access_key_id: String,
     secret_access_key: String,
+    session_token: Option<String>,
 }
 
 impl Credentials {
@@ -17,7 +19,21 @@ impl Credentials {
         Self {
             access_key_id: access_key_id.to_owned(),
             secret_access_key: secret_access_key.to_owned(),
+            session_token: None,
         }
+    }
+
+    /// These credentials as temporary ones, presented with `session_token` — what an STS call answered beside the
+    /// key and secret.
+    #[must_use]
+    pub fn with_session_token(mut self, session_token: &str) -> Self {
+        self.session_token = Some(session_token.to_owned());
+        self
+    }
+
+    /// The session token temporary credentials are presented with; `None` for long-term ones.
+    pub(crate) fn session_token(&self) -> Option<&str> {
+        self.session_token.as_deref()
     }
 
     /// The access key ID, which is not secret.
@@ -38,6 +54,10 @@ impl std::fmt::Debug for Credentials {
             .debug_struct("Credentials")
             .field("access_key_id", &self.access_key_id)
             .field("secret_access_key", &"<redacted>")
+            .field(
+                "session_token",
+                &self.session_token.as_ref().map(|_| "<redacted>"),
+            )
             .finish()
     }
 }

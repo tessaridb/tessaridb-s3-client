@@ -93,3 +93,37 @@ fn errors_name_the_setting_and_never_echo_a_value() {
         .to_string();
     assert!(none.contains("TESSARIDB_S3_ENDPOINT"), "{none}");
 }
+
+#[test]
+fn temporary_credentials_carry_their_session_token_from_either_source() {
+    let shows_token = |settings: &super::Settings| {
+        format!("{:?}", settings.credentials).contains("session_token: Some")
+    };
+    let env: HashMap<&str, &str> = [
+        ("TESSARIDB_S3_ENDPOINT", "http://env:1"),
+        ("TESSARIDB_S3_ACCESS_KEY", "TSKEY"),
+        ("TESSARIDB_S3_SECRET_KEY", "env-secret"),
+        ("TESSARIDB_S3_SESSION_TOKEN", "TSS1token"),
+    ]
+    .into();
+    let settings = load("default", |name| {
+        env.get(name).map(|value| (*value).to_owned())
+    })
+    .expect("env settings");
+    assert!(shows_token(&settings));
+    assert!(
+        !format!("{:?}", settings.credentials).contains("TSS1token"),
+        "never printed"
+    );
+    let directory = tempfile::tempdir().expect("dir");
+    let text = format!(
+        "{PROFILE}\n[temporary]\nendpoint = http://127.0.0.1:9000\naccess_key = TS\nsecret_key = s\nsession_token = TSS1token\n"
+    );
+    let path = write_profile(directory.path(), &text, 0o600).expect("profile written");
+    assert!(shows_token(
+        &from_file(&path, "temporary").expect("temporary profile")
+    ));
+    assert!(!shows_token(
+        &from_file(&path, "default").expect("default profile")
+    ));
+}

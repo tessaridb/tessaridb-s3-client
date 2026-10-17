@@ -3,6 +3,12 @@
 All notable changes to this project are recorded here. The format follows Keep a Changelog, and versions follow
 Semantic Versioning.
 
+## Unreleased
+
+- Temporary credentials: `Credentials::with_session_token` signs every request with `x-amz-security-token` and every
+  presigned URL with `X-Amz-Security-Token`; the CLI reads `TESSARIDB_S3_SESSION_TOKEN` or a profile's
+  `session_token`.
+
 ## 0.1.1 — 2026-10-15
 
 The first version on crates.io; the library is unchanged from 0.1.0.

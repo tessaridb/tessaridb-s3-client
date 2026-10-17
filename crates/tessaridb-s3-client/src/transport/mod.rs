@@ -145,6 +145,10 @@ impl Transport {
         let mut headers = request.headers.clone();
         headers.push(("host".to_owned(), host_header(&url)));
         headers.push(("x-amz-date".to_owned(), amz_date(now)));
+        // Temporary credentials present their session token as an `x-amz-*` header, which is signed like the rest.
+        if let Some(token) = self.signer.session_token() {
+            headers.push(("x-amz-security-token".to_owned(), token.to_owned()));
+        }
         let (body, length, payload_hash) = body(&request.payload).await?;
         headers.push(("x-amz-content-sha256".to_owned(), payload_hash.clone()));
         let authorization = self.signer.authorization(

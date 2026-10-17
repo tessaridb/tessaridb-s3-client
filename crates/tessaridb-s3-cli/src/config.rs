@@ -1,6 +1,6 @@
 //! Where the endpoint and credentials come from: the environment (`TESSARIDB_S3_ENDPOINT`, `_ACCESS_KEY`,
-//! `_SECRET_KEY`, `_REGION`) or, when it names none, a profile file — `$XDG_CONFIG_HOME/tessaridb-s3/credentials`
-//! (`~/.config/…` without it) — readable by its owner alone. There is no command-line flag for a secret: an argument
+//! `_SECRET_KEY`, `_REGION`, and `_SESSION_TOKEN` for temporary credentials) or, when it names none, a profile file —
+//! `$XDG_CONFIG_HOME/tessaridb-s3/credentials` (`~/.config/…` without it) — readable by its owner alone. There is no command-line flag for a secret: an argument
 //! is visible to every process on the machine and stays in shell history. Errors name the setting, never its value.
 
 use std::path::{Path, PathBuf};
@@ -24,10 +24,15 @@ pub(crate) fn load(profile: &str, variable: impl Fn(&str) -> Option<String>) -> 
     let access = variable("TESSARIDB_S3_ACCESS_KEY");
     let secret = variable("TESSARIDB_S3_SECRET_KEY").map(Zeroizing::new);
     if let (Some(endpoint), Some(access), Some(secret)) = (&endpoint, &access, &secret) {
+        let credentials = Credentials::new(access, secret);
+        let token = variable("TESSARIDB_S3_SESSION_TOKEN").map(Zeroizing::new);
         return Ok(Settings {
             endpoint: endpoint.clone(),
             region: variable("TESSARIDB_S3_REGION"),
-            credentials: Credentials::new(access, secret),
+            credentials: match &token {
+                Some(token) => credentials.with_session_token(token),
+                None => credentials,
+            },
         });
     }
     let path = profile_path(&variable).ok_or_else(|| {
@@ -59,6 +64,7 @@ pub(crate) fn from_file(path: &Path, profile: &str) -> Result<Settings> {
     let section = format!("[{profile}]");
     let mut inside = false;
     let (mut endpoint, mut access, mut secret, mut region) = (None, None, None, None);
+    let mut token: Option<Zeroizing<String>> = None;
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {
             inside = line == section;
@@ -78,6 +84,7 @@ pub(crate) fn from_file(path: &Path, profile: &str) -> Result<Settings> {
             "access_key" => access = Some(value),
             "secret_key" => secret = Some(Zeroizing::new(value)),
             "region" => region = Some(value),
+            "session_token" => token = Some(Zeroizing::new(value)),
             other => {
                 return Err(CliError::Invalid(format!(
                     "the profile file {shown} has an unknown setting `{other}`"
@@ -90,10 +97,14 @@ pub(crate) fn from_file(path: &Path, profile: &str) -> Result<Settings> {
     let endpoint = endpoint.ok_or_else(|| missing("endpoint"))?;
     let access = access.ok_or_else(|| missing("access_key"))?;
     let secret = secret.ok_or_else(|| missing("secret_key"))?;
+    let credentials = Credentials::new(&access, &secret);
     Ok(Settings {
         endpoint,
         region,
-        credentials: Credentials::new(&access, &secret),
+        credentials: match &token {
+            Some(token) => credentials.with_session_token(token),
+            None => credentials,
+        },
     })
 }
 
