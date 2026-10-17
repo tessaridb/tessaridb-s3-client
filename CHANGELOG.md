@@ -3,7 +3,7 @@
 All notable changes to this project are recorded here. The format follows Keep a Changelog, and versions follow
 Semantic Versioning.
 
-## Unreleased
+## 0.2.0 — 2026-10-17
 
 - Temporary credentials: `Credentials::with_session_token` signs every request with `x-amz-security-token` and every
   presigned URL with `X-Amz-Security-Token`; the CLI reads `TESSARIDB_S3_SESSION_TOKEN` or a profile's
