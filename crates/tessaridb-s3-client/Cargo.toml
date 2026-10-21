@@ -1,7 +1,7 @@
 [package]
 name = "tessaridb-s3-client"
 description = "An async Rust client for S3-compatible object storage, built for moving files"
-version = "0.2.0"
+version = "0.2.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

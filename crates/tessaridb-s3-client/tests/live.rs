@@ -78,11 +78,10 @@ async fn a_bucket_is_created_listed_and_deleted() -> Result<()> {
     let bucket = unique_bucket("bucket")?;
     client.create_bucket(&bucket).await?;
     assert!(client.bucket_exists(&bucket).await?);
+    // In us-east-1 S3 answers its owner's re-create with success and changes nothing.
     let again = client.create_bucket(&bucket).await;
-    assert!(
-        matches!(&again, Err(error) if error.category() == ErrorCategory::Conflict),
-        "{again:?}"
-    );
+    assert!(again.is_ok(), "{again:?}");
+    assert!(client.bucket_exists(&bucket).await?);
     let names: Vec<String> = client
         .list_buckets()
         .await?

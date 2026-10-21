@@ -3,6 +3,11 @@
 All notable changes to this project are recorded here. The format follows Keep a Changelog, and versions follow
 Semantic Versioning.
 
+## 0.2.1 — 2026-10-21
+
+- Builds take rustls-webpki 0.103.16 and webpki-root-certs 1.0.10 (RUSTSEC-2026-0382, RUSTSEC-2026-0383). The
+  library's API is unchanged.
+
 ## 0.2.0 — 2026-10-17
 
 - Temporary credentials: `Credentials::with_session_token` signs every request with `x-amz-security-token` and every
